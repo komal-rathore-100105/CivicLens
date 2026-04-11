@@ -1,28 +1,17 @@
+import { useEffect, useState } from "react";
 import { MapPin, Zap, Users, Coins, TrendingUp, ArrowUpRight } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-
-const stats = [
-  { label: "Active Missions", value: "247", change: "+12%", icon: MapPin },
-  { label: "Volunteers", value: "1,892", change: "+8%", icon: Users },
-  { label: "CO₂ Offset (tons)", value: "45.3", change: "+23%", icon: TrendingUp },
-  { label: "Funds Deployed", value: "₹12.4L", change: "+15%", icon: Coins },
-];
+import { supabase } from "@/integrations/supabase/client";
+import MissionMap from "@/components/MissionMap";
 
 const chartData = [
-  { month: "Jan", missions: 30, impact: 4.2 },
-  { month: "Feb", missions: 45, impact: 6.1 },
-  { month: "Mar", missions: 62, impact: 9.3 },
-  { month: "Apr", missions: 78, impact: 12.5 },
-  { month: "May", missions: 120, impact: 18.7 },
-  { month: "Jun", missions: 165, impact: 28.4 },
-  { month: "Jul", missions: 247, impact: 45.3 },
-];
-
-const missions = [
-  { id: 1, title: "Plastic Cleanup — Juhu Beach", category: "waste_cleared", status: "active", volunteers: 12, fund: "₹25,000", urgency: "high" },
-  { id: 2, title: "Tree Plantation — Aarey Colony", category: "tree_planted", status: "active", volunteers: 34, fund: "₹50,000", urgency: "medium" },
-  { id: 3, title: "Road Repair — Andheri East", category: "road_repaired", status: "verified", volunteers: 8, fund: "₹1,20,000", urgency: "low" },
-  { id: 4, title: "Blood Drive — Priority Alpha", category: "priority_alpha", status: "urgent", volunteers: 3, fund: "₹0", urgency: "critical" },
+  { month: "Jan", impact: 4.2 },
+  { month: "Feb", impact: 6.1 },
+  { month: "Mar", impact: 9.3 },
+  { month: "Apr", impact: 12.5 },
+  { month: "May", impact: 18.7 },
+  { month: "Jun", impact: 28.4 },
+  { month: "Jul", impact: 45.3 },
 ];
 
 const urgencyColors: Record<string, string> = {
@@ -32,19 +21,56 @@ const urgencyColors: Record<string, string> = {
   low: "bg-muted text-muted-foreground border-border",
 };
 
+type Mission = {
+  id: string;
+  title: string;
+  category: string;
+  status: string;
+  urgency: string;
+  volunteer_count: number | null;
+  fund_goal: number | null;
+  fund_raised: number | null;
+};
+
 export default function Index() {
+  const [missions, setMissions] = useState<Mission[]>([]);
+  const [volunteerCount, setVolunteerCount] = useState(0);
+  const [totalCo2, setTotalCo2] = useState(0);
+
+  useEffect(() => {
+    supabase.from("missions").select("*").order("created_at", { ascending: false }).then(({ data }) => {
+      if (data) setMissions(data);
+    });
+    supabase.from("volunteers").select("co2_offset").then(({ data }) => {
+      if (data) {
+        setVolunteerCount(data.length);
+        setTotalCo2(data.reduce((sum, v) => sum + (v.co2_offset || 0), 0));
+      }
+    });
+  }, []);
+
+  const totalFunds = missions.reduce((s, m) => s + (m.fund_raised || 0), 0);
+  const hasPriorityAlpha = missions.some(m => m.urgency === "critical");
+
+  const stats = [
+    { label: "Active Missions", value: String(missions.length), change: "+12%", icon: MapPin },
+    { label: "Volunteers", value: String(volunteerCount), change: "+8%", icon: Users },
+    { label: "CO₂ Offset (tons)", value: totalCo2.toFixed(1), change: "+23%", icon: TrendingUp },
+    { label: "Funds Deployed", value: `₹${(totalFunds / 1000).toFixed(0)}K`, change: "+15%", icon: Coins },
+  ];
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
-      {/* Priority Alpha Banner */}
-      <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 flex items-center gap-3 animate-pulse-glow">
-        <Zap className="h-5 w-5 text-destructive" />
-        <div>
-          <p className="text-sm font-heading text-destructive">PRIORITY ALPHA — Blood Drive Active</p>
-          <p className="text-xs text-muted-foreground mt-0.5">3 volunteers matched within 5km. WhatsApp alerts sent.</p>
+      {hasPriorityAlpha && (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 flex items-center gap-3 animate-pulse-glow">
+          <Zap className="h-5 w-5 text-destructive" />
+          <div>
+            <p className="text-sm font-heading text-destructive">PRIORITY ALPHA — Blood Drive Active</p>
+            <p className="text-xs text-muted-foreground mt-0.5">3 volunteers matched within 5km. WhatsApp alerts sent.</p>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {stats.map(({ label, value, change, icon: Icon }, i) => (
           <div key={label} className="rounded-xl border border-border bg-card p-4 animate-slide-up" style={{ animationDelay: `${i * 100}ms` }}>
@@ -60,7 +86,6 @@ export default function Index() {
         ))}
       </div>
 
-      {/* Chart + Map placeholder */}
       <div className="grid lg:grid-cols-2 gap-4">
         <div className="rounded-xl border border-border bg-card p-5">
           <h3 className="font-heading text-sm text-foreground mb-4">Impact Growth</h3>
@@ -82,35 +107,22 @@ export default function Index() {
         </div>
 
         <div className="rounded-xl border border-border bg-card p-5 flex flex-col">
-          <h3 className="font-heading text-sm text-foreground mb-4">Mission Map</h3>
-          <div className="flex-1 rounded-lg bg-secondary/50 flex items-center justify-center min-h-[220px] relative overflow-hidden">
-            <div className="absolute inset-0 opacity-20" style={{ backgroundImage: "radial-gradient(circle at 30% 40%, hsl(155 100% 38% / 0.3), transparent 50%), radial-gradient(circle at 70% 60%, hsl(200 80% 50% / 0.2), transparent 40%)" }} />
-            {/* Mock map pins */}
-            {[
-              { top: "25%", left: "30%", color: "bg-primary" },
-              { top: "45%", left: "55%", color: "bg-chart-3" },
-              { top: "60%", left: "40%", color: "bg-destructive" },
-              { top: "35%", left: "70%", color: "bg-chart-2" },
-            ].map((pin, i) => (
-              <div key={i} className={`absolute w-3 h-3 rounded-full ${pin.color} animate-pulse`} style={{ top: pin.top, left: pin.left }} />
-            ))}
-            <p className="text-xs text-muted-foreground z-10">Mapbox integration ready</p>
-          </div>
+          <h3 className="font-heading text-sm text-foreground mb-4">Mission Map — Live</h3>
+          <MissionMap />
         </div>
       </div>
 
-      {/* Mission Feed */}
       <div>
         <h3 className="font-heading text-sm text-foreground mb-3">Mission Feed</h3>
         <div className="space-y-2">
           {missions.map((m) => (
             <div key={m.id} className="rounded-xl border border-border bg-card p-4 flex items-center gap-4 hover:border-primary/30 transition-colors cursor-pointer">
-              <div className={`px-2 py-1 rounded-md text-[10px] font-heading border ${urgencyColors[m.urgency]}`}>
+              <div className={`px-2 py-1 rounded-md text-[10px] font-heading border ${urgencyColors[m.urgency] || urgencyColors.low}`}>
                 {m.urgency.toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-foreground truncate">{m.title}</p>
-                <p className="text-xs text-muted-foreground">{m.volunteers} volunteers · {m.fund}</p>
+                <p className="text-xs text-muted-foreground">{m.volunteer_count || 0} volunteers · ₹{(m.fund_raised || 0).toLocaleString()}</p>
               </div>
               <span className="text-xs text-muted-foreground font-heading">{m.category.replace("_", " ")}</span>
             </div>
