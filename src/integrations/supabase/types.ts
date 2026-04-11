@@ -14,7 +14,188 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      community_posts: {
+        Row: {
+          author_avatar: string
+          author_name: string
+          content: string
+          created_at: string
+          id: string
+          likes: number | null
+          location: string | null
+          replies: number | null
+          tag: string | null
+        }
+        Insert: {
+          author_avatar?: string
+          author_name?: string
+          content: string
+          created_at?: string
+          id?: string
+          likes?: number | null
+          location?: string | null
+          replies?: number | null
+          tag?: string | null
+        }
+        Update: {
+          author_avatar?: string
+          author_name?: string
+          content?: string
+          created_at?: string
+          id?: string
+          likes?: number | null
+          location?: string | null
+          replies?: number | null
+          tag?: string | null
+        }
+        Relationships: []
+      }
+      impact_proofs: {
+        Row: {
+          after_photo_url: string | null
+          before_photo_url: string | null
+          co2_offset_kg: number | null
+          created_at: string
+          exif_authentic: boolean | null
+          geo_distance_m: number | null
+          geo_within_geofence: boolean | null
+          id: string
+          mission_id: string | null
+          sdgs: string[] | null
+          verification_status: string | null
+          vision_class: string | null
+          vision_confidence: number | null
+          volunteer_name: string | null
+        }
+        Insert: {
+          after_photo_url?: string | null
+          before_photo_url?: string | null
+          co2_offset_kg?: number | null
+          created_at?: string
+          exif_authentic?: boolean | null
+          geo_distance_m?: number | null
+          geo_within_geofence?: boolean | null
+          id?: string
+          mission_id?: string | null
+          sdgs?: string[] | null
+          verification_status?: string | null
+          vision_class?: string | null
+          vision_confidence?: number | null
+          volunteer_name?: string | null
+        }
+        Update: {
+          after_photo_url?: string | null
+          before_photo_url?: string | null
+          co2_offset_kg?: number | null
+          created_at?: string
+          exif_authentic?: boolean | null
+          geo_distance_m?: number | null
+          geo_within_geofence?: boolean | null
+          id?: string
+          mission_id?: string | null
+          sdgs?: string[] | null
+          verification_status?: string | null
+          vision_class?: string | null
+          vision_confidence?: number | null
+          volunteer_name?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "impact_proofs_mission_id_fkey"
+            columns: ["mission_id"]
+            isOneToOne: false
+            referencedRelation: "missions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      missions: {
+        Row: {
+          category: string
+          created_at: string
+          description: string | null
+          fund_goal: number | null
+          fund_raised: number | null
+          geofence_radius: number | null
+          id: string
+          latitude: number
+          location_name: string | null
+          longitude: number
+          status: string
+          title: string
+          updated_at: string
+          urgency: string
+          volunteer_count: number | null
+        }
+        Insert: {
+          category?: string
+          created_at?: string
+          description?: string | null
+          fund_goal?: number | null
+          fund_raised?: number | null
+          geofence_radius?: number | null
+          id?: string
+          latitude?: number
+          location_name?: string | null
+          longitude?: number
+          status?: string
+          title: string
+          updated_at?: string
+          urgency?: string
+          volunteer_count?: number | null
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          description?: string | null
+          fund_goal?: number | null
+          fund_raised?: number | null
+          geofence_radius?: number | null
+          id?: string
+          latitude?: number
+          location_name?: string | null
+          longitude?: number
+          status?: string
+          title?: string
+          updated_at?: string
+          urgency?: string
+          volunteer_count?: number | null
+        }
+        Relationships: []
+      }
+      volunteers: {
+        Row: {
+          avatar: string
+          badge: string | null
+          co2_offset: number | null
+          created_at: string
+          id: string
+          impact_rank: number | null
+          name: string
+          sbt_count: number | null
+        }
+        Insert: {
+          avatar?: string
+          badge?: string | null
+          co2_offset?: number | null
+          created_at?: string
+          id?: string
+          impact_rank?: number | null
+          name: string
+          sbt_count?: number | null
+        }
+        Update: {
+          avatar?: string
+          badge?: string | null
+          co2_offset?: number | null
+          created_at?: string
+          id?: string
+          impact_rank?: number | null
+          name?: string
+          sbt_count?: number | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
