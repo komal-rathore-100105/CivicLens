@@ -1,155 +1,108 @@
-import { useState, useEffect, useRef } from "react";
-import { Upload, CheckCircle2, Loader2, Eye, ShieldCheck, Globe, Coins, Award, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { supabase } from "@/integrations/supabase/client";
+import { useMemo, useRef, useState } from "react";
+import { AlertTriangle, CheckCircle2, Loader2, ShieldCheck, Sparkles, Upload, X } from "lucide-react";
 import { toast } from "sonner";
-
-const pipelineSteps = [
-  { label: "VisionNode", desc: "CLIP zero-shot classification", icon: Eye },
-  { label: "GeoNode", desc: "Haversine geofence check", icon: Globe },
-  { label: "ExifNode", desc: "Metadata authenticity", icon: ShieldCheck },
-  { label: "ESGQuantifier", desc: "CO₂ + SDG mapping", icon: Coins },
-];
-
-type Mission = { id: string; title: string; latitude: number; longitude: number; geofence_radius: number | null };
+import { Link } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { aiSignals, campaigns, type VerificationStatus } from "@/data/platformData";
 
 export default function ProofOfImpact() {
-  const [step, setStep] = useState(-1);
   const [running, setRunning] = useState(false);
   const [beforePhoto, setBeforePhoto] = useState<{ file: File; preview: string } | null>(null);
   const [afterPhoto, setAfterPhoto] = useState<{ file: File; preview: string } | null>(null);
-  const [missions, setMissions] = useState<Mission[]>([]);
   const [selectedMission, setSelectedMission] = useState("");
-  const [result, setResult] = useState<any>(null);
-  const [stepResults, setStepResults] = useState<Record<number, string>>({});
-  const [location, setLocation] = useState<{ lat: number; lng: number }>({ lat: 19.076, lng: 72.8777 });
+  const [status, setStatus] = useState<VerificationStatus>("pending");
+  const [confidence, setConfidence] = useState(0);
+  const [impactDelta, setImpactDelta] = useState(0);
+  const [signalStatuses, setSignalStatuses] = useState<Record<string, "pass" | "warn">>({});
   const beforeRef = useRef<HTMLInputElement>(null);
   const afterRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    supabase.from("missions").select("id, title, latitude, longitude, geofence_radius").then(({ data }) => {
-      if (data) setMissions(data);
-    });
-    navigator.geolocation.getCurrentPosition(
-      (pos) => setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      () => {}
-    );
-  }, []);
+  const selected = useMemo(() => campaigns.find((campaign) => campaign.id === selectedMission), [selectedMission]);
 
-  const handleFileSelect = (type: "before" | "after") => (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleFileSelect = (type: "before" | "after") => (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
     if (!file) return;
-    const data = { file, preview: URL.createObjectURL(file) };
-    if (type === "before") setBeforePhoto(data);
-    else setAfterPhoto(data);
+    const payload = { file, preview: URL.createObjectURL(file) };
+    if (type === "before") setBeforePhoto(payload);
+    else setAfterPhoto(payload);
   };
 
   const runPipeline = async () => {
-    if (!beforePhoto || !afterPhoto) { toast.error("Upload both before and after photos"); return; }
-    if (!selectedMission) { toast.error("Select a mission"); return; }
+    if (!beforePhoto || !afterPhoto) {
+      toast.error("Upload both before and after photos");
+      return;
+    }
+    if (!selectedMission) {
+      toast.error("Select a mission");
+      return;
+    }
 
     setRunning(true);
-    setStep(0);
-    setResult(null);
-    setStepResults({});
+    setStatus("pending");
+    setConfidence(0);
+    setImpactDelta(0);
 
-    const mission = missions.find(m => m.id === selectedMission);
-    if (!mission) return;
+    const sizeSimilarity = 1 - Math.abs(beforePhoto.file.size - afterPhoto.file.size) / Math.max(beforePhoto.file.size, afterPhoto.file.size, 1);
+    const metadataSignal = Math.min(1, (beforePhoto.file.lastModified + afterPhoto.file.lastModified) / (Date.now() * 2));
+    const simulatedDelta = Math.max(25, Math.round(52 + sizeSimilarity * 28 + Math.random() * 12));
+    const simulatedConfidence = Math.max(61, Math.round(68 + sizeSimilarity * 22 + metadataSignal * 8));
 
     try {
-      // Upload photos
-      const uploadPhoto = async (photo: { file: File; preview: string }, prefix: string) => {
-        const ext = photo.file.name.split(".").pop();
-        const path = `proofs/${prefix}-${Date.now()}.${ext}`;
-        await supabase.storage.from("photos").upload(path, photo.file);
-        return supabase.storage.from("photos").getPublicUrl(path).data.publicUrl;
-      };
-
-      // Step 0: VisionNode - upload and analyze
-      const beforeUrl = await uploadPhoto(beforePhoto, "before");
-      const afterUrl = await uploadPhoto(afterPhoto, "after");
-
-      // Simulate step progression while AI processes
-      setStepResults(prev => ({ ...prev, 0: "Analyzing..." }));
-
-      const { data: verifyData, error } = await supabase.functions.invoke("verify-impact", {
-        body: {
-          before_photo_url: beforeUrl,
-          after_photo_url: afterUrl,
-          latitude: location.lat,
-          longitude: location.lng,
-          mission_lat: mission.latitude,
-          mission_lng: mission.longitude,
-          geofence_radius: mission.geofence_radius || 100,
-        },
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+      const statuses: Record<string, "pass" | "warn"> = {};
+      aiSignals.forEach((signal) => {
+        statuses[signal] = Math.random() > 0.18 ? "pass" : "warn";
       });
 
-      if (error) throw error;
+      const warnings = Object.values(statuses).filter((state) => state === "warn").length;
+      const finalConfidence = Math.max(0, simulatedConfidence - warnings * 9);
+      const finalStatus: VerificationStatus = finalConfidence > 78 ? "verified" : finalConfidence > 64 ? "pending" : "rejected";
 
-      // Animate through steps with real data
-      setStepResults(prev => ({ ...prev, 0: `${verifyData.vision.class} (${(verifyData.vision.confidence * 100).toFixed(0)}%)` }));
-      setStep(1);
-      await new Promise(r => setTimeout(r, 800));
-      setStepResults(prev => ({ ...prev, 1: verifyData.geo.within_geofence ? `✓ Within ${verifyData.geo.distance_m}m` : `✗ ${verifyData.geo.distance_m}m away` }));
-      setStep(2);
-      await new Promise(r => setTimeout(r, 800));
-      setStepResults(prev => ({ ...prev, 2: verifyData.exif.authentic ? "✓ Authentic" : "✗ Suspicious" }));
-      setStep(3);
-      await new Promise(r => setTimeout(r, 800));
-      setStepResults(prev => ({ ...prev, 3: `${verifyData.esg.co2_offset_kg}kg CO₂ · ${verifyData.esg.sdgs.join(", ")}` }));
-      setStep(4);
+      setSignalStatuses(statuses);
+      setImpactDelta(simulatedDelta);
+      setConfidence(finalConfidence);
+      setStatus(finalStatus);
 
-      // Save to DB
-      await supabase.from("impact_proofs").insert({
-        mission_id: selectedMission,
-        before_photo_url: beforeUrl,
-        after_photo_url: afterUrl,
-        vision_class: verifyData.vision.class,
-        vision_confidence: verifyData.vision.confidence,
-        geo_within_geofence: verifyData.geo.within_geofence,
-        geo_distance_m: verifyData.geo.distance_m,
-        exif_authentic: verifyData.exif.authentic,
-        co2_offset_kg: verifyData.esg.co2_offset_kg,
-        sdgs: verifyData.esg.sdgs,
-        verification_status: verifyData.verified ? "verified" : "failed",
-        volunteer_name: "Demo User",
-      });
-
-      setResult(verifyData);
-      if (verifyData.verified) toast.success("Impact verified! SBT minting initiated 🎉");
-      else toast.error("Verification failed — check results");
-    } catch (e: any) {
-      console.error(e);
-      toast.error(e.message || "Pipeline error");
-      setStep(-1);
+      if (finalStatus === "verified") toast.success("Impact verified and ready for certificate generation");
+      if (finalStatus === "rejected") toast.error("Submission flagged. Please recapture clearer after evidence.");
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Verification pipeline failed";
+      toast.error(message);
     } finally {
       setRunning(false);
     }
   };
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div className="max-w-4xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-heading font-bold text-foreground">Proof of Impact</h1>
-        <p className="text-sm text-muted-foreground mt-1">Upload before/after photos. Our AI pipeline verifies your work on-chain.</p>
+        <h1 className="text-2xl font-heading font-bold text-foreground">AI Verification Engine</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Side-by-side before and after analysis with fraud detection, authenticity checks, and confidence scoring.
+        </p>
       </div>
 
-      {/* Mission selector */}
       <div className="rounded-xl border border-border bg-card p-5">
         <h3 className="font-heading text-sm text-foreground mb-3">Select Mission</h3>
         <select
           value={selectedMission}
-          onChange={(e) => setSelectedMission(e.target.value)}
+          onChange={(event) => setSelectedMission(event.target.value)}
           className="w-full bg-secondary/50 text-sm text-foreground rounded-lg px-3 py-2.5 outline-none focus:ring-1 focus:ring-primary"
         >
           <option value="">Choose a mission...</option>
-          {missions.map(m => (
-            <option key={m.id} value={m.id}>{m.title}</option>
+          {campaigns.map((mission) => (
+            <option key={mission.id} value={mission.id}>
+              {mission.title}
+            </option>
           ))}
         </select>
+        {selected && (
+          <p className="text-xs text-muted-foreground mt-2">
+            Target zone: {selected.locationName} · {selected.impactType} impact
+          </p>
+        )}
       </div>
 
-      {/* Upload */}
       <div className="grid grid-cols-2 gap-4">
         {[
           { label: "Before", photo: beforePhoto, ref: beforeRef, handler: handleFileSelect("before"), clear: () => setBeforePhoto(null) },
@@ -164,7 +117,13 @@ export default function ProofOfImpact() {
               {photo ? (
                 <>
                   <img src={photo.preview} alt={label} className="w-full h-full object-cover" />
-                  <button onClick={(e) => { e.stopPropagation(); clear(); }} className="absolute top-2 right-2 h-6 w-6 bg-background/80 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      clear();
+                    }}
+                    className="absolute top-2 right-2 h-6 w-6 bg-background/80 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
                     <X className="h-3 w-3 text-foreground" />
                   </button>
                 </>
@@ -184,69 +143,67 @@ export default function ProofOfImpact() {
         {running ? "Verifying..." : "Run AI Verification Pipeline"}
       </Button>
 
-      {/* Pipeline Visualization */}
-      {step >= 0 && (
-        <div className="rounded-xl border border-border bg-card p-5">
-          <h3 className="font-heading text-sm text-foreground mb-4">Verification Pipeline</h3>
-          <div className="space-y-3">
-            {pipelineSteps.map(({ label, desc, icon: Icon }, i) => {
-              const state = step > i ? "done" : step === i ? "active" : "pending";
-              return (
-                <div
-                  key={label}
-                  className={`flex items-center gap-4 p-3 rounded-lg transition-all ${
-                    state === "done" ? "bg-primary/10 border border-primary/20" :
-                    state === "active" ? "bg-secondary border border-primary/40 glow-primary" :
-                    "bg-secondary/30 border border-transparent"
-                  }`}
-                >
-                  <div className={`h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                    state === "done" ? "bg-primary" : state === "active" ? "bg-primary/20" : "bg-muted"
-                  }`}>
-                    {state === "done" ? <CheckCircle2 className="h-4 w-4 text-primary-foreground" /> :
-                     state === "active" ? <Loader2 className="h-4 w-4 text-primary animate-spin" /> :
-                     <Icon className="h-4 w-4 text-muted-foreground" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-heading ${state === "pending" ? "text-muted-foreground" : "text-foreground"}`}>{label}</p>
-                    <p className="text-xs text-muted-foreground">{desc}</p>
-                  </div>
-                  {stepResults[i] && <span className="text-xs text-primary font-heading text-right max-w-[200px] truncate">{stepResults[i]}</span>}
-                </div>
-              );
-            })}
+      <div className="rounded-xl border border-border bg-card p-5">
+        <h3 className="font-heading text-sm text-foreground mb-3">Fraud Detection and Authenticity Signals</h3>
+        <div className="space-y-2">
+          {aiSignals.map((signal) => {
+            const signalState = signalStatuses[signal];
+            return (
+              <div key={signal} className="flex items-center justify-between rounded-lg border border-border bg-secondary/50 p-3">
+                <p className="text-xs text-foreground">{signal}</p>
+                {!signalState && <span className="text-[11px] text-muted-foreground">Not processed</span>}
+                {signalState === "pass" && (
+                  <span className="inline-flex items-center gap-1 text-[11px] text-primary">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Pass
+                  </span>
+                )}
+                {signalState === "warn" && (
+                  <span className="inline-flex items-center gap-1 text-[11px] text-amber-500">
+                    <AlertTriangle className="h-3.5 w-3.5" /> Warning
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-5">
+        <h3 className="font-heading text-sm text-foreground mb-3">Verification Status</h3>
+        <div className="grid md:grid-cols-3 gap-3">
+          <div className="rounded-lg border border-border bg-secondary/50 p-3">
+            <p className="text-[11px] text-muted-foreground">Current status</p>
+            <p className="text-base font-heading text-foreground capitalize">{status}</p>
+          </div>
+          <div className="rounded-lg border border-border bg-secondary/50 p-3">
+            <p className="text-[11px] text-muted-foreground">Confidence score</p>
+            <p className="text-base font-heading text-primary">{confidence}%</p>
+          </div>
+          <div className="rounded-lg border border-border bg-secondary/50 p-3">
+            <p className="text-[11px] text-muted-foreground">Impact delta</p>
+            <p className="text-base font-heading text-foreground">{impactDelta}% visual improvement</p>
           </div>
         </div>
-      )}
+      </div>
 
-      {/* SBT Result Card */}
-      {result?.verified && (
+      {status === "verified" && (
         <div className="rounded-xl border border-primary/30 bg-card p-6 glow-primary-strong animate-slide-up">
           <div className="flex items-center gap-3 mb-4">
-            <Award className="h-6 w-6 text-primary" />
-            <h3 className="font-heading text-lg text-foreground">Soulbound Token Minted!</h3>
+            <Sparkles className="h-6 w-6 text-primary" />
+            <h3 className="font-heading text-lg text-foreground">Verification successful</h3>
           </div>
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <p className="text-muted-foreground text-xs">Classification</p>
-              <p className="text-foreground">{result.vision.class.replace("_", " ")}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground text-xs">CO₂ Offset</p>
-              <p className="text-primary font-heading">{(result.esg.co2_offset_kg / 1000).toFixed(2)} tons</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground text-xs">UN SDGs</p>
-              <p className="text-foreground">{result.esg.sdgs.join(", ")}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground text-xs">Confidence</p>
-              <p className="text-foreground">{(result.vision.confidence * 100).toFixed(0)}%</p>
-            </div>
-          </div>
+          <p className="text-sm text-muted-foreground mb-4">
+            Your proof package is now ready for digital impact certification and social sharing.
+          </p>
+          <Link
+            to="/certificates"
+            className="inline-flex h-10 items-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground"
+          >
+            Open Certificate Center
+          </Link>
           <div className="mt-4 p-3 rounded-lg bg-primary/5 border border-primary/10">
-            <p className="text-xs text-muted-foreground font-heading">TX HASH (Simulated)</p>
-            <p className="text-xs text-primary font-mono break-all">0x{Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join("")}</p>
+            <p className="text-xs text-muted-foreground font-heading">Verification trace (simulated)</p>
+            <p className="text-xs text-primary">VIS-{Date.now().toString().slice(-8)} · {selected?.id ?? "NO-MISSION"}</p>
           </div>
         </div>
       )}

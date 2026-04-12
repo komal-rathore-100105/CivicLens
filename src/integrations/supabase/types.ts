@@ -14,6 +14,121 @@ export type Database = {
   }
   public: {
     Tables: {
+      app_notifications: {
+        Row: {
+          campaign_id: string | null
+          channel: string
+          created_at: string
+          id: string
+          message: string
+          priority: string
+          title: string
+          user_phone: string | null
+        }
+        Insert: {
+          campaign_id?: string | null
+          channel?: string
+          created_at?: string
+          id?: string
+          message: string
+          priority?: string
+          title: string
+          user_phone?: string | null
+        }
+        Update: {
+          campaign_id?: string | null
+          channel?: string
+          created_at?: string
+          id?: string
+          message?: string
+          priority?: string
+          title?: string
+          user_phone?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "app_notifications_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "missions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      campaign_registrations: {
+        Row: {
+          campaign_id: string
+          campaign_title: string
+          created_at: string
+          id: string
+          phone: string | null
+          status: string
+          user_key: string
+          whatsapp_opt_in: boolean
+        }
+        Insert: {
+          campaign_id: string
+          campaign_title: string
+          created_at?: string
+          id?: string
+          phone?: string | null
+          status?: string
+          user_key?: string
+          whatsapp_opt_in?: boolean
+        }
+        Update: {
+          campaign_id?: string
+          campaign_title?: string
+          created_at?: string
+          id?: string
+          phone?: string | null
+          status?: string
+          user_key?: string
+          whatsapp_opt_in?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_registrations_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "missions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      certificate_anchors: {
+        Row: {
+          anchor_status: string
+          certificate_id: string
+          chain_reference: string
+          content_hash: string
+          created_at: string
+          id: string
+          mission_title: string
+          recipient_name: string
+        }
+        Insert: {
+          anchor_status?: string
+          certificate_id: string
+          chain_reference: string
+          content_hash: string
+          created_at?: string
+          id?: string
+          mission_title: string
+          recipient_name: string
+        }
+        Update: {
+          anchor_status?: string
+          certificate_id?: string
+          chain_reference?: string
+          content_hash?: string
+          created_at?: string
+          id?: string
+          mission_title?: string
+          recipient_name?: string
+        }
+        Relationships: []
+      }
       community_posts: {
         Row: {
           author_avatar: string
@@ -47,6 +162,27 @@ export type Database = {
           location?: string | null
           replies?: number | null
           tag?: string | null
+        }
+        Relationships: []
+      }
+      company_task_progress: {
+        Row: {
+          company_key: string
+          company_name: string
+          completed_tasks: number
+          updated_at: string
+        }
+        Insert: {
+          company_key: string
+          company_name: string
+          completed_tasks?: number
+          updated_at?: string
+        }
+        Update: {
+          company_key?: string
+          company_name?: string
+          completed_tasks?: number
+          updated_at?: string
         }
         Relationships: []
       }
@@ -121,6 +257,7 @@ export type Database = {
           latitude: number
           location_name: string | null
           longitude: number
+          required_volunteers: number
           status: string
           title: string
           updated_at: string
@@ -138,6 +275,7 @@ export type Database = {
           latitude?: number
           location_name?: string | null
           longitude?: number
+          required_volunteers?: number
           status?: string
           title: string
           updated_at?: string
@@ -155,6 +293,7 @@ export type Database = {
           latitude?: number
           location_name?: string | null
           longitude?: number
+          required_volunteers?: number
           status?: string
           title?: string
           updated_at?: string

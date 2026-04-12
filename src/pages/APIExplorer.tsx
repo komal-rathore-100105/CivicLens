@@ -5,48 +5,62 @@ import { Button } from "@/components/ui/button";
 const endpoints = [
   {
     method: "GET",
-    path: "/api/missions",
-    desc: "List all active missions",
+    path: "/api/v1/campaigns?verified=true&urgency=high",
+    desc: "List campaigns with smart filters",
     response: {
-      missions: [
-        { id: 1, title: "Juhu Beach Cleanup", status: "active", volunteers: 12, geofence: { lat: 19.0948, lng: 72.8267, radius: 100 } },
-        { id: 2, title: "Aarey Tree Plantation", status: "active", volunteers: 34, geofence: { lat: 19.1547, lng: 72.8625, radius: 100 } },
+      campaigns: [
+        { id: "cmp-101", title: "Mithi River Plastic Recovery", urgency: "critical", verified: true },
+        { id: "cmp-102", title: "Aarey Urban Forest Restore", urgency: "high", verified: true },
       ],
-      total: 247,
+      total: 2,
     },
   },
   {
     method: "POST",
-    path: "/api/verify-impact",
-    desc: "Submit proof for AI verification",
+    path: "/api/v1/verification/scan",
+    desc: "Submit before and after evidence for AI verification",
     response: {
-      pipeline: { vision: { class: "waste_cleared", confidence: 0.94 }, geo: { within_geofence: true, distance_m: 42 }, exif: { authentic: true, timestamp: "2024-01-15T10:30:00Z" }, esg: { co2_offset_kg: 420, sdgs: ["SDG 11", "SDG 14"] } },
-      result: "VERIFIED",
-      sbt_tx: "0x7a3b...d4e1",
+      verificationStatus: "verified",
+      confidence: 93,
+      fraudSignals: {
+        exif: "pass",
+        geolocation: "pass",
+        manipulationCheck: "warn",
+      },
+      impactDelta: 67,
     },
   },
   {
     method: "GET",
-    path: "/api/leaderboard",
-    desc: "Get volunteer rankings",
+    path: "/api/v1/certificates/user/pri-22",
+    desc: "Fetch generated impact certificate",
     response: {
-      leaderboard: [
-        { rank: 1, name: "Priya Sharma", sbt_count: 24, co2_offset: "12.4 tons" },
-        { rank: 2, name: "Arjun Mehta", sbt_count: 19, co2_offset: "9.8 tons" },
-      ],
+      certificateId: "CIV-90124510",
+      user: "Priya Sharma",
+      campaign: "Mithi River Plastic Recovery",
+      verifiedImpact: "1240 kg CO2 equivalent",
+      issuedAt: "2026-04-12T11:42:00Z",
     },
   },
   {
     method: "GET",
-    path: "/api/escrow/:missionId",
-    desc: "Check escrow status",
+    path: "/api/v1/esg/company/grn-01/dashboard",
+    desc: "Get corporate ESG dashboard metrics",
     response: {
-      mission_id: 1,
-      amount: "25000",
-      currency: "INR",
-      status: "locked",
-      timelock_remaining: "5d 12h",
-      tx_hash: "0x7a3b...d4e1",
+      carbonOffsetTons: 38.2,
+      participationRate: 0.91,
+      completionRate: 0.84,
+      certificationStage: "Stage 3 / 4",
+    },
+  },
+  {
+    method: "POST",
+    path: "/api/v1/auth/oauth/google",
+    desc: "Role-based secure OAuth login",
+    response: {
+      token: "eyJhb...",
+      role: "volunteer",
+      permissions: ["report:create", "campaign:join", "certificate:view"],
     },
   },
 ];

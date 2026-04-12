@@ -1,102 +1,121 @@
-import { Wallet, ArrowUpRight, Clock, CheckCircle2, ExternalLink } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowUpRight, Building2, CheckCircle2, Leaf, Target } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { campaigns as seedCampaigns, corporateMilestones, type Campaign } from "@/data/platformData";
+import { completeNextCompanyTask, getAllCampaigns, getCompanyCompletedTaskCount } from "@/lib/campaignStore";
 
-const escrowMissions = [
-  { id: 1, title: "Juhu Beach Cleanup", funded: "₹25,000", status: "escrow_locked", timelock: "5d 12h", tx: "0x7a3b...d4e1" },
-  { id: 2, title: "Aarey Tree Plantation", funded: "₹50,000", status: "impact_verified", timelock: "Released", tx: "0x9c2f...b8a3" },
-  { id: 3, title: "Andheri Road Repair", funded: "₹1,20,000", status: "pending_verification", timelock: "7d 0h", tx: "0x4e1d...c7f5" },
-];
-
-const statusStyles: Record<string, { label: string; className: string }> = {
-  escrow_locked: { label: "Escrow Locked", className: "bg-chart-3/20 text-chart-3" },
-  impact_verified: { label: "Impact Verified", className: "bg-primary/20 text-primary" },
-  pending_verification: { label: "Pending", className: "bg-chart-2/20 text-chart-2" },
-};
-
-const impactFeed = [
-  { time: "2 min ago", text: "SBT #247 minted for Priya Sharma — Juhu Cleanup", type: "sbt" },
-  { time: "15 min ago", text: "₹25,000 escrow released — Mission #42 verified", type: "escrow" },
-  { time: "1 hr ago", text: "New mission funded: Road repair Andheri East", type: "fund" },
-  { time: "3 hr ago", text: "AI Pipeline verified waste_cleared at 94% confidence", type: "ai" },
-];
+const fallbackPortfolio = seedCampaigns.filter((campaign) => campaign.sponsor);
 
 export default function DonorDashboard() {
+  const [completedTasks, setCompletedTasks] = useState(0);
+  const [portfolioCampaigns, setPortfolioCampaigns] = useState<Campaign[]>(fallbackPortfolio);
+
+  useEffect(() => {
+    const load = async () => {
+      const [count, remoteCampaigns] = await Promise.all([
+        getCompanyCompletedTaskCount(),
+        getAllCampaigns(),
+      ]);
+      setCompletedTasks(count);
+      setPortfolioCampaigns(remoteCampaigns.length ? remoteCampaigns.slice(0, 8) : fallbackPortfolio);
+    };
+
+    void load();
+  }, []);
+
+  const totalOffset = portfolioCampaigns.reduce((sum, campaign) => sum + campaign.co2PotentialKg, 0);
+  const completionRate = Math.round((completedTasks / corporateMilestones.length) * 100);
+
+  const dynamicMilestones = useMemo(() => {
+    return corporateMilestones.map((milestone, index) => ({
+      ...milestone,
+      done: index < completedTasks,
+    }));
+  }, [completedTasks]);
+
+  const markTaskComplete = async () => {
+    const next = await completeNextCompanyTask();
+    setCompletedTasks(next);
+    toast.success("Company task completed. ESG report readiness updated.");
+  };
+
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-5xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-heading font-bold text-foreground">Donor Dashboard</h1>
-        <p className="text-sm text-muted-foreground mt-1">Fund missions, track escrow, and see your impact.</p>
+        <h1 className="text-2xl font-heading font-bold text-foreground">Corporate ESG Sponsorship Hub</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Sponsor campaigns, track carbon offset performance, and monitor zero-carbon office progress.
+        </p>
       </div>
 
-      {/* Wallet */}
       <div className="rounded-xl border border-primary/20 bg-card p-5 glow-primary">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <Wallet className="h-5 w-5 text-primary" />
-            <span className="font-heading text-sm text-foreground">Connected Wallet</span>
+            <Building2 className="h-5 w-5 text-primary" />
+            <span className="font-heading text-sm text-foreground">CivicLens Corporate Console</span>
           </div>
-          <span className="text-xs text-muted-foreground font-mono">0x1a2b...9f8e</span>
+          <span className="text-xs text-muted-foreground">GreenOrbit Technologies</span>
         </div>
         <div className="grid grid-cols-3 gap-4">
           <div>
-            <p className="text-xs text-muted-foreground">Total Funded</p>
-            <p className="text-lg font-heading text-foreground">₹1,95,000</p>
+            <p className="text-xs text-muted-foreground">Sponsored campaigns</p>
+            <p className="text-lg font-heading text-foreground">{portfolioCampaigns.length}</p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground">In Escrow</p>
-            <p className="text-lg font-heading text-chart-3">₹1,45,000</p>
+            <p className="text-xs text-muted-foreground">Carbon offset contribution</p>
+            <p className="text-lg font-heading text-chart-3">{(totalOffset / 1000).toFixed(1)} tCO2e</p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground">Released</p>
-            <p className="text-lg font-heading text-primary">₹50,000</p>
+            <p className="text-xs text-muted-foreground">Completion rate</p>
+            <p className="text-lg font-heading text-primary">{completionRate}%</p>
           </div>
         </div>
       </div>
 
-      {/* Escrow */}
       <div>
-        <h3 className="font-heading text-sm text-foreground mb-3">Escrow Status</h3>
+        <h3 className="font-heading text-sm text-foreground mb-3">Zero-Carbon Office Progress Tracker</h3>
+        <Button onClick={markTaskComplete} size="sm" variant="secondary" className="mb-3">
+          Complete Next Task
+        </Button>
         <div className="space-y-2">
-          {escrowMissions.map((m) => {
-            const st = statusStyles[m.status];
-            return (
-              <div key={m.id} className="rounded-xl border border-border bg-card p-4 flex items-center gap-4">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground">{m.title}</p>
-                  <p className="text-xs text-muted-foreground">{m.funded}</p>
-                </div>
-                <div className={`px-2 py-1 rounded-md text-[10px] font-heading ${st.className}`}>{st.label}</div>
-                <div className="text-right">
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Clock className="h-3 w-3" />
-                    {m.timelock}
-                  </div>
-                  <p className="text-[10px] text-primary font-mono mt-0.5">{m.tx}</p>
-                </div>
+          {dynamicMilestones.map((milestone) => (
+            <div key={milestone.title} className="rounded-xl border border-border bg-card p-4 flex items-center gap-4">
+              <div className="h-8 w-8 rounded-full bg-secondary flex items-center justify-center">
+                {milestone.done ? <CheckCircle2 className="h-4 w-4 text-primary" /> : <Target className="h-4 w-4 text-muted-foreground" />}
               </div>
-            );
-          })}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-foreground">{milestone.title}</p>
+                <p className="text-xs text-muted-foreground">{milestone.done ? "Completed" : "In progress"}</p>
+              </div>
+              <span className={`px-2 py-1 rounded-md text-[10px] font-heading ${milestone.done ? "bg-primary/20 text-primary" : "bg-secondary text-secondary-foreground"}`}>
+                {milestone.done ? "Achieved" : "Open"}
+              </span>
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* Impact Feed */}
       <div>
-        <h3 className="font-heading text-sm text-foreground mb-3">Impact Feed</h3>
+        <h3 className="font-heading text-sm text-foreground mb-3">Sponsored Campaign Portfolio</h3>
         <div className="rounded-xl border border-border bg-card divide-y divide-border">
-          {impactFeed.map((item, i) => (
-            <div key={i} className="p-3 flex items-start gap-3">
-              <div className="h-2 w-2 rounded-full bg-primary mt-1.5 flex-shrink-0" />
+          {portfolioCampaigns.map((campaign) => (
+            <div key={campaign.id} className="p-3 flex items-start gap-3">
+              <Leaf className="h-4 w-4 text-primary mt-0.5" />
               <div className="flex-1">
-                <p className="text-sm text-foreground">{item.text}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">{item.time}</p>
+                <p className="text-sm text-foreground">{campaign.title}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {(campaign.sponsor || "CivicLens") + " · Potential " + campaign.co2PotentialKg.toLocaleString() + " kg CO2 · " + campaign.volunteers + "/" + campaign.targetVolunteers + " volunteers"}
+                </p>
               </div>
+              <span className="text-[10px] px-2 py-1 rounded-md bg-primary/10 text-primary">{campaign.urgency}</span>
             </div>
           ))}
         </div>
       </div>
 
       <Button className="w-full font-heading gap-2">
-        <ArrowUpRight className="h-4 w-4" /> Fund a New Mission
+        <ArrowUpRight className="h-4 w-4" /> Sponsor Additional Campaign
       </Button>
     </div>
   );

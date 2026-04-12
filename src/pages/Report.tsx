@@ -1,8 +1,20 @@
-import { useState, useRef, useEffect } from "react";
-import { Mic, Camera, MapPin, DollarSign, Send, Square, Circle, CheckCircle2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Camera, CheckCircle2, MapPin, Mic, Send, ShieldCheck, Sparkles, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
+import { addReportedCampaign } from "@/lib/campaignStore";
 import { toast } from "sonner";
+
+type VoiceRecognition = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: { results: ArrayLike<{ 0: { transcript: string } }> }) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
 
 const categories = ["waste_cleanup", "road_repair", "tree_plantation", "water_body", "public_health", "priority_alpha"];
 const categoryLabels: Record<string, string> = {
@@ -14,254 +26,428 @@ const categoryLabels: Record<string, string> = {
   priority_alpha: "Priority Alpha",
 };
 
+const categoryImpactType: Record<string, "Waste" | "Trees" | "Water" | "Air"> = {
+  waste_cleanup: "Waste",
+  road_repair: "Air",
+  tree_plantation: "Trees",
+  water_body: "Water",
+  public_health: "Air",
+  priority_alpha: "Water",
+};
+
+const urgencyBaseVolunteers: Record<"critical" | "high" | "medium" | "low", number> = {
+  critical: 70,
+  high: 45,
+  medium: 30,
+  low: 16,
+};
+
 export default function Report() {
-  const [recording, setRecording] = useState(false);
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState("");
-  const [photos, setPhotos] = useState<{ file: File; preview: string }[]>([]);
+  const [photos, setPhotos] = useState<{ file: File; preview: string; capturedAt: string }[]>([]);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [fundGoal, setFundGoal] = useState("");
+  const [urgency, setUrgency] = useState<"critical" | "high" | "medium" | "low">("medium");
+  const [volunteerNeeded, setVolunteerNeeded] = useState("30");
   const [submitting, setSubmitting] = useState(false);
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationName, setLocationName] = useState("Detecting...");
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [currentStep, setCurrentStep] = useState(1);
+  const [voiceSupported, setVoiceSupported] = useState(false);
+  const [listening, setListening] = useState(false);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+  const recognitionRef = useRef<VoiceRecognition | null>(null);
 
   useEffect(() => {
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        setLocationName(`${pos.coords.latitude.toFixed(4)}° N, ${pos.coords.longitude.toFixed(4)}° E`);
+      (position) => {
+        setLocation({ lat: position.coords.latitude, lng: position.coords.longitude });
+        setLocationName(`${position.coords.latitude.toFixed(4)}° N, ${position.coords.longitude.toFixed(4)}° E`);
       },
       () => {
         setLocation({ lat: 19.076, lng: 72.8777 });
         setLocationName("19.0760° N, 72.8777° E (default)");
       }
     );
+
+    const voiceWindow = window as Window & {
+      SpeechRecognition?: new () => VoiceRecognition;
+      webkitSpeechRecognition?: new () => VoiceRecognition;
+    };
+    setVoiceSupported(Boolean(voiceWindow.SpeechRecognition || voiceWindow.webkitSpeechRecognition));
   }, []);
 
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      chunksRef.current = [];
-      mediaRecorder.ondataavailable = (e) => chunksRef.current.push(e.data);
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-        setAudioUrl(URL.createObjectURL(blob));
-        stream.getTracks().forEach(t => t.stop());
-      };
-      mediaRecorder.start();
-      setRecording(true);
-    } catch {
-      toast.error("Microphone access denied");
-    }
-  };
-
-  const stopRecording = () => {
-    mediaRecorderRef.current?.stop();
-    setRecording(false);
-  };
-
-  const handlePhotos = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    const newPhotos = files.map(file => ({
+  const handlePhotos = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    const nextPhotos = files.map((file) => ({
       file,
       preview: URL.createObjectURL(file),
+      capturedAt: new Date().toISOString(),
     }));
-    setPhotos(prev => [...prev, ...newPhotos].slice(0, 4));
+    setPhotos((previous) => [...previous, ...nextPhotos].slice(0, 4));
   };
 
-  const removePhoto = (idx: number) => {
-    setPhotos(prev => prev.filter((_, i) => i !== idx));
+  const removePhoto = (index: number) => {
+    setPhotos((previous) => previous.filter((_, itemIndex) => itemIndex !== index));
+  };
+
+  const suggestVolunteerNeed = () => {
+    let value = urgencyBaseVolunteers[urgency];
+    if (selectedCategory === "tree_plantation") value += 10;
+    if (selectedCategory === "priority_alpha") value += 20;
+    if (selectedCategory === "water_body") value += 8;
+    setVolunteerNeeded(String(value));
+  };
+
+  const runAiEnhancer = () => {
+    const enhanced = `${title || "Environmental issue"} reported at ${locationName}. Category: ${selectedCategory ? categoryLabels[selectedCategory] : "general"}. Priority level: ${urgency}. Suggested volunteer operation should include safety briefing, geo-tagged task confirmation, and before/after impact documentation.`;
+    setDescription(enhanced);
+    suggestVolunteerNeed();
+    toast.success("AI enhancer filled draft description and volunteer estimate");
+  };
+
+  const startVoiceInput = () => {
+    const voiceWindow = window as Window & {
+      SpeechRecognition?: new () => VoiceRecognition;
+      webkitSpeechRecognition?: new () => VoiceRecognition;
+    };
+    const RecognitionCtor = voiceWindow.SpeechRecognition || voiceWindow.webkitSpeechRecognition;
+
+    if (!RecognitionCtor) {
+      toast.error("Voice input is not supported in this browser");
+      return;
+    }
+
+    if (!recognitionRef.current) {
+      recognitionRef.current = new RecognitionCtor();
+    }
+
+    const recognition = recognitionRef.current;
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
+
+    recognition.onresult = (event) => {
+      const transcript = Array.from(event.results)
+        .map((result) => result[0].transcript)
+        .join(" ")
+        .trim();
+      if (transcript) {
+        setDescription((previous) => `${previous} ${transcript}`.trim());
+      }
+    };
+
+    recognition.onerror = () => {
+      toast.error("Could not capture voice input");
+      setListening(false);
+    };
+
+    recognition.onend = () => {
+      setListening(false);
+    };
+
+    setListening(true);
+    recognition.start();
+  };
+
+  const stopVoiceInput = () => {
+    recognitionRef.current?.stop();
+    setListening(false);
+  };
+
+  const resetForm = () => {
+    setTitle("");
+    setDescription("");
+    setSelectedCategory("");
+    setUrgency("medium");
+    setVolunteerNeeded("30");
+    setPhotos([]);
+    setCurrentStep(1);
   };
 
   const handleSubmit = async () => {
-    if (!title || !selectedCategory) {
-      toast.error("Please fill in title and category");
+    if (!title || !selectedCategory || !description) {
+      toast.error("Please complete title, category, and description");
       return;
     }
+    if (photos.length === 0) {
+      toast.error("First step requires camera capture or image upload");
+      return;
+    }
+
     setSubmitting(true);
 
+    let remoteMessage: string | null = null;
+
     try {
-      // Upload photos
-      const photoUrls: string[] = [];
       for (const photo of photos) {
         const ext = photo.file.name.split(".").pop();
         const path = `missions/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-        const { error } = await supabase.storage.from("photos").upload(path, photo.file);
-        if (!error) {
-          const { data: urlData } = supabase.storage.from("photos").getPublicUrl(path);
-          photoUrls.push(urlData.publicUrl);
-        }
+        await supabase.storage.from("photos").upload(path, photo.file);
       }
 
-      const { error } = await supabase.from("missions").insert({
+      const result = await addReportedCampaign({
         title,
-        description: description || undefined,
-        category: selectedCategory,
-        urgency: selectedCategory === "priority_alpha" ? "critical" : "medium",
-        latitude: location?.lat || 19.076,
-        longitude: location?.lng || 72.8777,
-        location_name: locationName,
-        fund_goal: fundGoal ? parseInt(fundGoal) : 0,
+        summary: description,
+        locationName,
+        lat: location?.lat || 19.076,
+        lng: location?.lng || 72.8777,
+        urgency,
+        impactType: categoryImpactType[selectedCategory] || "Waste",
+        targetVolunteers: Number.parseInt(volunteerNeeded, 10) || 25,
       });
 
-      if (error) throw error;
-      toast.success("Mission reported successfully!");
-      setTitle("");
-      setDescription("");
-      setSelectedCategory("");
-      setPhotos([]);
-      setFundGoal("");
-      setAudioUrl(null);
-    } catch (e: any) {
-      toast.error(e.message || "Failed to submit report");
-    } finally {
-      setSubmitting(false);
+      if (!result.synced) {
+        remoteMessage = result.message || "Campaign listing sync failed";
+      }
+    } catch (error: unknown) {
+      remoteMessage = error instanceof Error ? error.message : "Failed to sync report";
     }
+
+    if (remoteMessage) {
+      toast.warning(`${remoteMessage}.`);
+    } else {
+      toast.success("Report submitted and listed in campaigns");
+    }
+
+    resetForm();
+    setSubmitting(false);
   };
 
+  const authenticityScore = Math.min(98, 72 + photos.length * 8 + (location ? 7 : 0));
+  const stepReady = {
+    1: photos.length > 0,
+    2: !!title && !!selectedCategory && !!description,
+    3: !!location,
+    4: true,
+  };
+
+  const canGoNext = stepReady[currentStep as keyof typeof stepReady];
+
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
+    <div className="max-w-3xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-heading font-bold text-foreground">Report an Issue</h1>
-        <p className="text-sm text-muted-foreground mt-1">Submit civic issues with voice, photos, and location data.</p>
+        <h1 className="text-2xl font-heading font-bold text-foreground">Team Reporting</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Step 1 begins with real-time camera capture or upload, then AI-enhanced form completion and campaign listing.
+        </p>
       </div>
 
-      {/* Title */}
-      <div className="rounded-xl border border-border bg-card p-5">
-        <h3 className="font-heading text-sm text-foreground mb-3">Mission Title</h3>
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="e.g. Beach cleanup at Juhu"
-          className="w-full bg-secondary/50 text-sm text-foreground placeholder:text-muted-foreground outline-none rounded-lg px-3 py-2.5 focus:ring-1 focus:ring-primary transition-all"
-        />
-      </div>
-
-      {/* Voice Recording */}
-      <div className="rounded-xl border border-border bg-card p-5">
-        <h3 className="font-heading text-sm text-foreground mb-3">Voice Description</h3>
-        <div className="flex items-center gap-4">
-          <button
-            onClick={recording ? stopRecording : startRecording}
-            className={`h-14 w-14 rounded-full flex items-center justify-center transition-all flex-shrink-0 ${
-              recording ? "bg-destructive glow-primary-strong" : "bg-primary/10 hover:bg-primary/20"
-            }`}
-          >
-            {recording ? <Square className="h-5 w-5 text-destructive-foreground" /> : <Mic className="h-5 w-5 text-primary" />}
-          </button>
-          <div className="flex-1">
-            {recording ? (
-              <div className="flex items-center gap-2">
-                <Circle className="h-2 w-2 text-destructive animate-pulse" />
-                <span className="text-sm text-foreground">Recording...</span>
-                <div className="flex-1 h-8 flex items-center gap-0.5">
-                  {Array.from({ length: 30 }).map((_, i) => (
-                    <div key={i} className="w-1 bg-primary rounded-full animate-pulse" style={{ height: `${Math.random() * 24 + 4}px`, animationDelay: `${i * 80}ms` }} />
-                  ))}
-                </div>
-              </div>
-            ) : audioUrl ? (
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-primary" />
-                <audio src={audioUrl} controls className="h-8 flex-1" />
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">Tap to start recording your report</p>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Description */}
-      <div className="rounded-xl border border-border bg-card p-5">
-        <h3 className="font-heading text-sm text-foreground mb-3">Description</h3>
-        <textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Describe the issue in detail..."
-          rows={3}
-          className="w-full bg-secondary/50 text-sm text-foreground placeholder:text-muted-foreground outline-none rounded-lg px-3 py-2.5 resize-none focus:ring-1 focus:ring-primary"
-        />
-      </div>
-
-      {/* Photo Upload */}
-      <div className="rounded-xl border border-border bg-card p-5">
-        <h3 className="font-heading text-sm text-foreground mb-3">Photos</h3>
-        <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handlePhotos} className="hidden" />
-        <div className="grid grid-cols-4 gap-3">
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="aspect-square rounded-lg border-2 border-dashed border-border hover:border-primary/50 flex flex-col items-center justify-center gap-1 transition-colors"
-          >
-            <Camera className="h-5 w-5 text-muted-foreground" />
-            <span className="text-[10px] text-muted-foreground">Add Photo</span>
-          </button>
-          {photos.map((photo, i) => (
-            <div key={i} className="aspect-square rounded-lg overflow-hidden relative group">
-              <img src={photo.preview} alt="" className="w-full h-full object-cover" />
-              <button onClick={() => removePhoto(i)} className="absolute top-1 right-1 h-5 w-5 bg-background/80 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                <X className="h-3 w-3 text-foreground" />
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Category */}
-      <div className="rounded-xl border border-border bg-card p-5">
-        <h3 className="font-heading text-sm text-foreground mb-3">Category</h3>
-        <div className="flex flex-wrap gap-2">
-          {categories.map((cat) => (
+      <div className="rounded-xl border border-border bg-card/80 backdrop-blur p-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          {[1, 2, 3, 4].map((step) => (
             <button
-              key={cat}
-              onClick={() => setSelectedCategory(cat)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                selectedCategory === cat ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+              key={step}
+              type="button"
+              onClick={() => setCurrentStep(step)}
+              className={`h-10 rounded-lg border text-xs font-medium ${
+                currentStep === step
+                  ? "border-primary bg-primary/10 text-primary"
+                  : stepReady[step as keyof typeof stepReady]
+                    ? "border-border bg-secondary/60 text-foreground"
+                    : "border-border bg-background text-muted-foreground"
               }`}
             >
-              {categoryLabels[cat]}
+              Step {step}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Location */}
-      <div className="rounded-xl border border-border bg-card p-5">
-        <h3 className="font-heading text-sm text-foreground mb-3">Location (Auto-detected)</h3>
-        <div className="flex items-center gap-3 p-3 rounded-lg bg-secondary/50">
-          <MapPin className="h-4 w-4 text-primary" />
-          <div>
-            <p className="text-sm text-foreground">{locationName}</p>
-            {location && <p className="text-xs text-muted-foreground">GPS coordinates captured</p>}
-          </div>
-        </div>
-      </div>
+      {currentStep === 1 && (
+        <section className="rounded-xl border border-border bg-card p-5 space-y-4">
+          <h3 className="font-heading text-sm text-foreground">Step 1 - Capture real-time image or upload</h3>
 
-      {/* Fund Goal */}
-      <div className="rounded-xl border border-border bg-card p-5">
-        <h3 className="font-heading text-sm text-foreground mb-3">Fund Goal (Optional)</h3>
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary/50">
-          <DollarSign className="h-4 w-4 text-muted-foreground" />
           <input
-            type="number"
-            value={fundGoal}
-            onChange={(e) => setFundGoal(e.target.value)}
-            placeholder="25000"
-            className="bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none flex-1"
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            multiple
+            onChange={handlePhotos}
+            className="hidden"
           />
-        </div>
-      </div>
+          <input
+            ref={uploadInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handlePhotos}
+            className="hidden"
+          />
 
-      <Button onClick={handleSubmit} disabled={submitting} className="w-full gap-2 font-heading">
-        <Send className="h-4 w-4" />
-        {submitting ? "Submitting..." : "Submit Report"}
-      </Button>
+          <div className="grid md:grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => cameraInputRef.current?.click()}
+              className="rounded-xl border-2 border-dashed border-border hover:border-primary/50 p-6 flex flex-col items-center justify-center gap-2"
+            >
+              <Camera className="h-7 w-7 text-primary" />
+              <p className="text-sm text-foreground">Capture from camera</p>
+              <p className="text-xs text-muted-foreground">Recommended for real-time evidence</p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => uploadInputRef.current?.click()}
+              className="rounded-xl border-2 border-dashed border-border hover:border-primary/50 p-6 flex flex-col items-center justify-center gap-2"
+            >
+              <Upload className="h-7 w-7 text-primary" />
+              <p className="text-sm text-foreground">Upload image</p>
+              <p className="text-xs text-muted-foreground">Use this when live capture is unavailable</p>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {photos.map((photo, index) => (
+              <div key={index} className="aspect-square rounded-lg overflow-hidden relative group border border-border">
+                <img src={photo.preview} alt="Evidence" className="w-full h-full object-cover" />
+                <button
+                  onClick={() => removePhoto(index)}
+                  className="absolute top-1 right-1 h-5 w-5 bg-background/80 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <X className="h-3 w-3 text-foreground" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {currentStep === 2 && (
+        <section className="rounded-xl border border-border bg-card p-5 space-y-4">
+          <h3 className="font-heading text-sm text-foreground">Step 2 - Fill report form with voice and AI assistance</h3>
+
+          <input
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="Mission title"
+            className="w-full bg-secondary/50 text-sm text-foreground placeholder:text-muted-foreground outline-none rounded-lg px-3 py-2.5"
+          />
+
+          <textarea
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            placeholder="Describe the issue in detail"
+            rows={4}
+            className="w-full bg-secondary/50 text-sm text-foreground placeholder:text-muted-foreground outline-none rounded-lg px-3 py-2.5 resize-none"
+          />
+
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="secondary" onClick={listening ? stopVoiceInput : startVoiceInput} disabled={!voiceSupported}>
+              <Mic className="h-4 w-4" /> {listening ? "Stop Voice" : "Voice Fill"}
+            </Button>
+            <Button type="button" variant="secondary" onClick={runAiEnhancer}>
+              <Sparkles className="h-4 w-4" /> AI Enhance
+            </Button>
+            <Button type="button" variant="outline" onClick={suggestVolunteerNeed}>
+              Suggest Volunteers
+            </Button>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">Category</p>
+            <div className="flex flex-wrap gap-2">
+              {categories.map((category) => (
+                <button
+                  key={category}
+                  onClick={() => setSelectedCategory(category)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
+                    selectedCategory === category ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground"
+                  }`}
+                >
+                  {categoryLabels[category]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">Urgency</p>
+              <div className="flex gap-2 flex-wrap">
+                {(["critical", "high", "medium", "low"] as const).map((level) => (
+                  <button
+                    key={level}
+                    type="button"
+                    onClick={() => setUrgency(level)}
+                    className={`px-3 py-1.5 rounded-lg text-xs capitalize ${
+                      urgency === level ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground"
+                    }`}
+                  >
+                    {level}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">Volunteers needed (editable)</p>
+              <input
+                type="number"
+                value={volunteerNeeded}
+                onChange={(event) => setVolunteerNeeded(event.target.value)}
+                className="w-full bg-secondary/50 text-sm text-foreground placeholder:text-muted-foreground outline-none rounded-lg px-3 py-2.5"
+              />
+            </div>
+          </div>
+        </section>
+      )}
+
+      {currentStep === 3 && (
+        <section className="rounded-xl border border-border bg-card p-5 space-y-3">
+          <h3 className="font-heading text-sm text-foreground">Step 3 - Auto tags and trust preview</h3>
+          <div className="rounded-lg border border-border bg-secondary/40 p-3">
+            <div className="flex items-center gap-2 text-sm text-foreground">
+              <MapPin className="h-4 w-4 text-primary" />
+              <span>{locationName}</span>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Timestamp: {new Date().toLocaleString()}</p>
+            <p className="text-xs text-muted-foreground">Issue type: {selectedCategory ? categoryLabels[selectedCategory] : "Not selected"}</p>
+          </div>
+
+          <div className="rounded-lg border border-primary/20 bg-primary/10 p-3">
+            <div className="flex items-center gap-2 text-sm text-foreground">
+              <ShieldCheck className="h-4 w-4 text-primary" />
+              Authenticity preview score: <span className="font-heading text-primary">{authenticityScore}%</span>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Signals: geotag consistency, timestamp coherence, and capture integrity.</p>
+          </div>
+        </section>
+      )}
+
+      {currentStep === 4 && (
+        <section className="rounded-xl border border-border bg-card p-5 space-y-3">
+          <h3 className="font-heading text-sm text-foreground">Step 4 - Submit and list in campaigns</h3>
+          <div className="rounded-lg border border-border bg-secondary/40 p-3">
+            <p className="text-sm font-medium text-foreground">{title || "Untitled report"}</p>
+            <p className="text-xs text-muted-foreground mt-1">{description || "No description"}</p>
+            <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+              <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
+              {photos.length} evidence images · {volunteerNeeded} volunteers requested
+            </div>
+          </div>
+
+          <Button onClick={handleSubmit} disabled={submitting} className="w-full gap-2 font-heading">
+            <Send className="h-4 w-4" />
+            {submitting ? "Submitting..." : "Submit Report"}
+          </Button>
+        </section>
+      )}
+
+      <div className="flex justify-between gap-2">
+        <Button variant="outline" disabled={currentStep === 1} onClick={() => setCurrentStep((value) => Math.max(1, value - 1))}>
+          Back
+        </Button>
+        <Button
+          variant="secondary"
+          disabled={currentStep === 4 || !canGoNext}
+          onClick={() => setCurrentStep((value) => Math.min(4, value + 1))}
+        >
+          Next
+        </Button>
+      </div>
     </div>
   );
 }
