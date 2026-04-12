@@ -10,7 +10,6 @@ import {
   Code,
   MessageCircle,
   Menu,
-  Leaf,
   Bell,
   UserCircle2,
   Globe2,
@@ -45,7 +44,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
 
   useEffect(() => {
-    const savedLanguage = localStorage.getItem("civiclens-language");
+    const savedLanguage = localStorage.getItem("activise-language");
     if (savedLanguage) {
       setLanguage(savedLanguage);
     }
@@ -74,7 +73,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   const updateLanguage = (code: string) => {
     setLanguage(code);
-    localStorage.setItem("civiclens-language", code);
+    localStorage.setItem("activise-language", code);
   };
 
   return (
@@ -87,11 +86,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Sidebar */}
       <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-card/90 border-r border-border backdrop-blur-xl transform transition-transform duration-200 lg:translate-x-0 lg:static ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="flex items-center gap-2 p-5 border-b border-border">
-          <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-sm">
-            <Leaf className="h-4 w-4 text-primary-foreground" />
-          </div>
+          <img
+            src="/image.png"
+            alt="ActiVise logo"
+            className="h-9 w-9 rounded-xl object-cover border border-border shadow-sm"
+          />
           <div>
-            <span className="font-heading font-bold text-lg text-foreground block leading-tight">CivicLens</span>
+            <span className="font-heading font-bold text-lg text-foreground block leading-tight">ActiVise</span>
             <span className="text-[11px] text-muted-foreground">AI Environmental Intelligence</span>
           </div>
         </div>

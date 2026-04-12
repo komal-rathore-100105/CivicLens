@@ -53,7 +53,7 @@ export default function DonorDashboard() {
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Building2 className="h-5 w-5 text-primary" />
-            <span className="font-heading text-sm text-foreground">CivicLens Corporate Console</span>
+            <span className="font-heading text-sm text-foreground">ActiVise Corporate Console</span>
           </div>
           <span className="text-xs text-muted-foreground">GreenOrbit Technologies</span>
         </div>
@@ -105,7 +105,7 @@ export default function DonorDashboard() {
               <div className="flex-1">
                 <p className="text-sm text-foreground">{campaign.title}</p>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {(campaign.sponsor || "CivicLens") + " · Potential " + campaign.co2PotentialKg.toLocaleString() + " kg CO2 · " + campaign.volunteers + "/" + campaign.targetVolunteers + " volunteers"}
+                  {(campaign.sponsor || "ActiVise") + " · Potential " + campaign.co2PotentialKg.toLocaleString() + " kg CO2 · " + campaign.volunteers + "/" + campaign.targetVolunteers + " volunteers"}
                 </p>
               </div>
               <span className="text-[10px] px-2 py-1 rounded-md bg-primary/10 text-primary">{campaign.urgency}</span>

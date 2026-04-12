@@ -74,7 +74,7 @@ export default function Certificates() {
   };
 
   const sharePreview = async () => {
-    const shareText = `${certificate.user} earned a verified climate impact certificate on CivicLens (${certificate.verifiedImpact}).`;
+    const shareText = `${certificate.user} earned a verified climate impact certificate on ActiVise (${certificate.verifiedImpact}).`;
     if (navigator.share) {
       await navigator.share({
         title: "Digital Impact Certificate",

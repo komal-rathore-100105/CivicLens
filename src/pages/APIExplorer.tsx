@@ -86,7 +86,7 @@ export default function APIExplorer() {
     <div className="max-w-5xl mx-auto space-y-6">
       <div>
         <h1 className="text-2xl font-heading font-bold text-foreground">API Explorer</h1>
-        <p className="text-sm text-muted-foreground mt-1">Test CivicLens API endpoints with live responses.</p>
+        <p className="text-sm text-muted-foreground mt-1">Test ActiVise API endpoints with live responses.</p>
       </div>
 
       <div className="grid lg:grid-cols-5 gap-4">
