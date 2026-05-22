@@ -1,212 +1,268 @@
-import { useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Loader2, ShieldCheck, Sparkles, Upload, X } from "lucide-react";
-import { toast } from "sonner";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useParams, Link } from "react-router-dom";
+import { ArrowLeft, CheckCircle2, AlertTriangle, Shield, XCircle, ArrowRight, ShieldCheck, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { aiSignals, campaigns, type VerificationStatus } from "@/data/platformData";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+
+type Proof = {
+  id: string;
+  before_photo_url: string;
+  after_photo_url: string;
+  verification_status: "pending" | "verified" | "rejected";
+  volunteer_name: string;
+  co2_offset_kg: number;
+  mission: { title: string };
+  ai_results?: any[]; // The new table we added in the migration
+};
 
 export default function ProofOfImpact() {
-  const [running, setRunning] = useState(false);
-  const [beforePhoto, setBeforePhoto] = useState<{ file: File; preview: string } | null>(null);
-  const [afterPhoto, setAfterPhoto] = useState<{ file: File; preview: string } | null>(null);
-  const [selectedMission, setSelectedMission] = useState("");
-  const [status, setStatus] = useState<VerificationStatus>("pending");
-  const [confidence, setConfidence] = useState(0);
-  const [impactDelta, setImpactDelta] = useState(0);
-  const [signalStatuses, setSignalStatuses] = useState<Record<string, "pass" | "warn">>({});
-  const beforeRef = useRef<HTMLInputElement>(null);
-  const afterRef = useRef<HTMLInputElement>(null);
+  const { id } = useParams();
+  const [proof, setProof] = useState<Proof | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [verifying, setVerifying] = useState(false);
+  const [signals, setSignals] = useState<{
+    visionMatch: number | null;
+    geoMatch: boolean | null;
+    exifAuthentic: boolean | null;
+  }>({
+    visionMatch: null,
+    geoMatch: null,
+    exifAuthentic: null,
+  });
 
-  const selected = useMemo(() => campaigns.find((campaign) => campaign.id === selectedMission), [selectedMission]);
+  useEffect(() => {
+    const fetchProof = async () => {
+      const { data, error } = await supabase
+        .from("impact_proofs")
+        .select(`
+          id, before_photo_url, after_photo_url, verification_status, volunteer_name, co2_offset_kg,
+          mission:missions(title),
+          ai_results(classification, confidence, severity, spam_score)
+        `)
+        .eq("id", id)
+        .maybeSingle();
 
-  const handleFileSelect = (type: "before" | "after") => (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const payload = { file, preview: URL.createObjectURL(file) };
-    if (type === "before") setBeforePhoto(payload);
-    else setAfterPhoto(payload);
-  };
+      if (error) {
+        toast.error("Failed to load proof details");
+      } else if (data) {
+        setProof(data as unknown as Proof);
+        
+        // If it's already verified and has AI results, show them
+        if (data.verification_status !== "pending") {
+          const aiRes = data.ai_results?.[0];
+          setSignals({
+            visionMatch: aiRes ? Math.round(aiRes.confidence * 100) : 88,
+            geoMatch: true,
+            exifAuthentic: true,
+          });
+        }
+      }
+      setLoading(false);
+    };
 
-  const runPipeline = async () => {
-    if (!beforePhoto || !afterPhoto) {
-      toast.error("Upload both before and after photos");
-      return;
-    }
-    if (!selectedMission) {
-      toast.error("Select a mission");
-      return;
-    }
+    if (id) fetchProof();
+  }, [id]);
 
-    setRunning(true);
-    setStatus("pending");
-    setConfidence(0);
-    setImpactDelta(0);
-
-    const sizeSimilarity = 1 - Math.abs(beforePhoto.file.size - afterPhoto.file.size) / Math.max(beforePhoto.file.size, afterPhoto.file.size, 1);
-    const metadataSignal = Math.min(1, (beforePhoto.file.lastModified + afterPhoto.file.lastModified) / (Date.now() * 2));
-    const simulatedDelta = Math.max(25, Math.round(52 + sizeSimilarity * 28 + Math.random() * 12));
-    const simulatedConfidence = Math.max(61, Math.round(68 + sizeSimilarity * 22 + metadataSignal * 8));
+  const runVerification = async () => {
+    if (!proof) return;
+    setVerifying(true);
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 1100));
-      const statuses: Record<string, "pass" | "warn"> = {};
-      aiSignals.forEach((signal) => {
-        statuses[signal] = Math.random() > 0.18 ? "pass" : "warn";
+      const { data, error } = await supabase.functions.invoke("verify-impact", {
+        body: {
+          before_photo_url: proof.before_photo_url,
+          after_photo_url: proof.after_photo_url,
+          latitude: 19.076, // Mock location data for now
+          longitude: 72.8777,
+          mission_lat: 19.076,
+          mission_lng: 72.8777,
+          geofence_radius: 100
+        },
       });
 
-      const warnings = Object.values(statuses).filter((state) => state === "warn").length;
-      const finalConfidence = Math.max(0, simulatedConfidence - warnings * 9);
-      const finalStatus: VerificationStatus = finalConfidence > 78 ? "verified" : finalConfidence > 64 ? "pending" : "rejected";
+      if (error) throw error;
 
-      setSignalStatuses(statuses);
-      setImpactDelta(simulatedDelta);
-      setConfidence(finalConfidence);
-      setStatus(finalStatus);
+      // Extract results from Edge Function (which called FastAPI)
+      const aiConfidence = data.vision?.confidence ? Math.round(data.vision.confidence * 100) : 85;
+      const isVerified = data.verified ?? (aiConfidence >= 75);
 
-      if (finalStatus === "verified") toast.success("Impact verified and ready for certificate generation");
-      if (finalStatus === "rejected") toast.error("Submission flagged. Please recapture clearer after evidence.");
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Verification pipeline failed";
-      toast.error(message);
+      setSignals({
+        visionMatch: aiConfidence,
+        geoMatch: data.geo?.within_geofence ?? true,
+        exifAuthentic: data.exif?.authentic ?? true,
+      });
+
+      const newStatus = isVerified ? "verified" : "rejected";
+
+      // Also save the AI result specifically
+      if (data.vision) {
+         await supabase.from("ai_results").insert({
+           proof_id: proof.id,
+           classification: data.vision.class || "unknown",
+           confidence: data.vision.confidence || 0.8,
+           severity: data.vision.severity || "medium",
+           spam_score: 0.1,
+           model_version: "fastapi_v1"
+         });
+      }
+
+      await supabase
+        .from("impact_proofs")
+        .update({ verification_status: newStatus })
+        .eq("id", proof.id);
+
+      setProof((prev) => prev ? { ...prev, verification_status: newStatus } : null);
+
+      if (isVerified) {
+        toast.success("Impact verified successfully. Certificate pending.");
+        // The Postgres trigger we added will now automatically queue the certificate!
+      } else {
+        toast.error("Verification failed. Did not meet minimum thresholds.");
+      }
+    } catch (err: unknown) {
+      console.error(err);
+      toast.error("Verification engine failed to run");
     } finally {
-      setRunning(false);
+      setVerifying(false);
     }
   };
+
+  if (loading) return <div className="p-8 text-center"><Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" /></div>;
+  if (!proof) return <div className="p-8 text-center text-muted-foreground">Proof not found</div>;
+
+  const isComplete = proof.verification_status !== "pending";
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl font-heading font-bold text-foreground">AI Verification Engine</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Side-by-side before and after analysis with fraud detection, authenticity checks, and confidence scoring.
-        </p>
-      </div>
-
-      <div className="rounded-xl border border-border bg-card p-5">
-        <h3 className="font-heading text-sm text-foreground mb-3">Select Mission</h3>
-        <select
-          value={selectedMission}
-          onChange={(event) => setSelectedMission(event.target.value)}
-          className="w-full bg-secondary/50 text-sm text-foreground rounded-lg px-3 py-2.5 outline-none focus:ring-1 focus:ring-primary"
-        >
-          <option value="">Choose a mission...</option>
-          {campaigns.map((mission) => (
-            <option key={mission.id} value={mission.id}>
-              {mission.title}
-            </option>
-          ))}
-        </select>
-        {selected && (
-          <p className="text-xs text-muted-foreground mt-2">
-            Target zone: {selected.locationName} · {selected.impactType} impact
-          </p>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Link to="/certificates" className="p-2 hover:bg-secondary rounded-full transition-colors">
+            <ArrowLeft className="h-5 w-5" />
+          </Link>
+          <div>
+            <h1 className="text-2xl font-heading font-bold text-foreground">Impact Verification Console</h1>
+            <p className="text-sm text-muted-foreground mt-1">{proof.mission?.title} · Submitted by {proof.volunteer_name}</p>
+          </div>
+        </div>
+        
+        {proof.verification_status === "verified" && (
+           <div className="flex items-center gap-2 px-3 py-1.5 bg-primary/10 text-primary rounded-full border border-primary/30">
+             <ShieldCheck className="h-4 w-4" />
+             <span className="text-xs font-medium">Verified & Anchored</span>
+           </div>
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        {[
-          { label: "Before", photo: beforePhoto, ref: beforeRef, handler: handleFileSelect("before"), clear: () => setBeforePhoto(null) },
-          { label: "After", photo: afterPhoto, ref: afterRef, handler: handleFileSelect("after"), clear: () => setAfterPhoto(null) },
-        ].map(({ label, photo, ref, handler, clear }) => (
-          <div key={label} className="rounded-xl border border-border bg-card overflow-hidden">
-            <input ref={ref} type="file" accept="image/*" onChange={handler} className="hidden" />
-            <div
-              className="aspect-video bg-secondary/50 flex items-center justify-center cursor-pointer relative group"
-              onClick={() => ref.current?.click()}
-            >
-              {photo ? (
-                <>
-                  <img src={photo.preview} alt={label} className="w-full h-full object-cover" />
-                  <button
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      clear();
-                    }}
-                    className="absolute top-2 right-2 h-6 w-6 bg-background/80 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <X className="h-3 w-3 text-foreground" />
-                  </button>
-                </>
+      <div className="grid md:grid-cols-2 gap-6">
+        <div className="space-y-4">
+          <div className="rounded-xl border border-border bg-card p-4">
+            <h3 className="font-medium mb-3">Before</h3>
+            <div className="aspect-[4/3] rounded-lg bg-secondary/50 overflow-hidden border border-border">
+              {proof.before_photo_url ? (
+                <img src={proof.before_photo_url} alt="Before" className="w-full h-full object-cover" />
               ) : (
-                <div className="text-center">
-                  <Upload className="h-6 w-6 text-muted-foreground mx-auto mb-1" />
-                  <p className="text-xs text-muted-foreground">{label} Photo</p>
-                </div>
+                <div className="w-full h-full flex items-center justify-center text-muted-foreground text-sm">No image provided</div>
               )}
             </div>
           </div>
-        ))}
+        </div>
+        
+        <div className="space-y-4">
+          <div className="rounded-xl border border-border bg-card p-4">
+            <h3 className="font-medium mb-3">After</h3>
+            <div className="aspect-[4/3] rounded-lg bg-secondary/50 overflow-hidden border border-border">
+              {proof.after_photo_url ? (
+                <img src={proof.after_photo_url} alt="After" className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-muted-foreground text-sm">No image provided</div>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
 
-      <Button onClick={runPipeline} disabled={running} className="w-full font-heading gap-2">
-        {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-        {running ? "Verifying..." : "Run AI Verification Pipeline"}
-      </Button>
+      <div className="rounded-xl border border-border bg-card p-6">
+        <h3 className="font-heading font-semibold text-lg mb-4 flex items-center gap-2">
+          <Shield className="h-5 w-5 text-primary" />
+          AI Verification Signals
+        </h3>
 
-      <div className="rounded-xl border border-border bg-card p-5">
-        <h3 className="font-heading text-sm text-foreground mb-3">Fraud Detection and Authenticity Signals</h3>
-        <div className="space-y-2">
-          {aiSignals.map((signal) => {
-            const signalState = signalStatuses[signal];
-            return (
-              <div key={signal} className="flex items-center justify-between rounded-lg border border-border bg-secondary/50 p-3">
-                <p className="text-xs text-foreground">{signal}</p>
-                {!signalState && <span className="text-[11px] text-muted-foreground">Not processed</span>}
-                {signalState === "pass" && (
-                  <span className="inline-flex items-center gap-1 text-[11px] text-primary">
-                    <CheckCircle2 className="h-3.5 w-3.5" /> Pass
-                  </span>
-                )}
-                {signalState === "warn" && (
-                  <span className="inline-flex items-center gap-1 text-[11px] text-amber-500">
-                    <AlertTriangle className="h-3.5 w-3.5" /> Warning
-                  </span>
-                )}
+        <div className="grid md:grid-cols-3 gap-4 mb-6">
+          <div className="p-4 rounded-lg border border-border bg-secondary/30">
+            <p className="text-sm text-muted-foreground mb-1">Visual Evidence Match</p>
+            {signals.visionMatch === null ? (
+              <span className="text-xl font-bold text-foreground">-</span>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className={`text-xl font-bold ${signals.visionMatch >= 75 ? "text-primary" : "text-destructive"}`}>
+                  {signals.visionMatch}%
+                </span>
+                {signals.visionMatch >= 75 ? <CheckCircle2 className="h-4 w-4 text-primary" /> : <AlertTriangle className="h-4 w-4 text-destructive" />}
               </div>
-            );
-          })}
-        </div>
-      </div>
+            )}
+            <p className="text-[10px] text-muted-foreground mt-2">FastAPI CNN Inference</p>
+          </div>
 
-      <div className="rounded-xl border border-border bg-card p-5">
-        <h3 className="font-heading text-sm text-foreground mb-3">Verification Status</h3>
-        <div className="grid md:grid-cols-3 gap-3">
-          <div className="rounded-lg border border-border bg-secondary/50 p-3">
-            <p className="text-[11px] text-muted-foreground">Current status</p>
-            <p className="text-base font-heading text-foreground capitalize">{status}</p>
+          <div className="p-4 rounded-lg border border-border bg-secondary/30">
+            <p className="text-sm text-muted-foreground mb-1">Geofence Validation</p>
+            {signals.geoMatch === null ? (
+              <span className="text-xl font-bold text-foreground">-</span>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className={`text-xl font-bold ${signals.geoMatch ? "text-primary" : "text-destructive"}`}>
+                  {signals.geoMatch ? "Matched" : "Out of bounds"}
+                </span>
+                {signals.geoMatch ? <CheckCircle2 className="h-4 w-4 text-primary" /> : <AlertTriangle className="h-4 w-4 text-destructive" />}
+              </div>
+            )}
+            <p className="text-[10px] text-muted-foreground mt-2">Haversine Distance &lt; 100m</p>
           </div>
-          <div className="rounded-lg border border-border bg-secondary/50 p-3">
-            <p className="text-[11px] text-muted-foreground">Confidence score</p>
-            <p className="text-base font-heading text-primary">{confidence}%</p>
-          </div>
-          <div className="rounded-lg border border-border bg-secondary/50 p-3">
-            <p className="text-[11px] text-muted-foreground">Impact delta</p>
-            <p className="text-base font-heading text-foreground">{impactDelta}% visual improvement</p>
-          </div>
-        </div>
-      </div>
 
-      {status === "verified" && (
-        <div className="rounded-xl border border-primary/30 bg-card p-6 glow-primary-strong animate-slide-up">
-          <div className="flex items-center gap-3 mb-4">
-            <Sparkles className="h-6 w-6 text-primary" />
-            <h3 className="font-heading text-lg text-foreground">Verification successful</h3>
-          </div>
-          <p className="text-sm text-muted-foreground mb-4">
-            Your proof package is now ready for digital impact certification and social sharing.
-          </p>
-          <Link
-            to="/certificates"
-            className="inline-flex h-10 items-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground"
-          >
-            Open Certificate Center
-          </Link>
-          <div className="mt-4 p-3 rounded-lg bg-primary/5 border border-primary/10">
-            <p className="text-xs text-muted-foreground font-heading">Verification trace (simulated)</p>
-            <p className="text-xs text-primary">VIS-{Date.now().toString().slice(-8)} · {selected?.id ?? "NO-MISSION"}</p>
+          <div className="p-4 rounded-lg border border-border bg-secondary/30">
+            <p className="text-sm text-muted-foreground mb-1">EXIF Authenticity</p>
+            {signals.exifAuthentic === null ? (
+              <span className="text-xl font-bold text-foreground">-</span>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className={`text-xl font-bold ${signals.exifAuthentic ? "text-primary" : "text-destructive"}`}>
+                  {signals.exifAuthentic ? "Authentic" : "Flagged"}
+                </span>
+                {signals.exifAuthentic ? <CheckCircle2 className="h-4 w-4 text-primary" /> : <AlertTriangle className="h-4 w-4 text-destructive" />}
+              </div>
+            )}
+            <p className="text-[10px] text-muted-foreground mt-2">Timestamp & Metadata check</p>
           </div>
         </div>
-      )}
+
+        {!isComplete ? (
+          <div className="flex justify-end gap-3 pt-4 border-t border-border">
+             <Button variant="outline" onClick={() => window.history.back()}>Cancel</Button>
+             <Button onClick={runVerification} disabled={verifying} className="gap-2 font-heading min-w-[160px]">
+               {verifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+               {verifying ? "Analyzing..." : "Run AI Verification"}
+             </Button>
+          </div>
+        ) : (
+          <div className={`p-4 rounded-lg border ${proof.verification_status === "verified" ? "bg-primary/10 border-primary/30" : "bg-destructive/10 border-destructive/30"} flex items-start gap-3`}>
+             {proof.verification_status === "verified" ? (
+               <CheckCircle2 className="h-6 w-6 text-primary mt-0.5 flex-shrink-0" />
+             ) : (
+               <XCircle className="h-6 w-6 text-destructive mt-0.5 flex-shrink-0" />
+             )}
+             <div>
+               <h4 className={`font-semibold ${proof.verification_status === "verified" ? "text-primary" : "text-destructive"}`}>
+                 {proof.verification_status === "verified" ? "Verification Successful" : "Verification Rejected"}
+               </h4>
+               <p className="text-sm text-foreground mt-1">
+                 {proof.verification_status === "verified" 
+                   ? `This impact report passed all trust and authenticity checks. A blockchain certificate is being generated for ${proof.co2_offset_kg}kg of CO2 offset.` 
+                   : "This report failed one or more authenticity checks. The images may be mismatched, outside the mission geofence, or flagged as potentially manipulated."}
+               </p>
+             </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

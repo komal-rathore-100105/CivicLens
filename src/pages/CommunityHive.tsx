@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
-import { MessageCircle, ThumbsUp, Send, MapPin } from "lucide-react";
+import { MessageCircle, ThumbsUp, Send, MapPin, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import ThreadedComments, { type ForumComment } from "@/components/ThreadedComments";
 
 type Post = {
   id: string;
@@ -25,25 +26,67 @@ const tagColors: Record<string, string> = {
 
 export default function CommunityHive() {
   const [posts, setPosts] = useState<Post[]>([]);
+  const [commentsMap, setCommentsMap] = useState<Record<string, ForumComment[]>>({});
   const [newPost, setNewPost] = useState("");
   const [posting, setPosting] = useState(false);
   const [activeMembers, setActiveMembers] = useState(28);
+  const [expandedPosts, setExpandedPosts] = useState<Set<string>>(new Set());
+  const [sortBy, setSortBy] = useState<"new" | "hot">("new");
 
   const fetchPosts = async () => {
-    const { data } = await supabase.from("community_posts").select("*").order("created_at", { ascending: false });
+    let query = supabase.from("community_posts").select("*");
+    
+    if (sortBy === "new") {
+      query = query.order("created_at", { ascending: false });
+    } else {
+      query = query.order("likes", { ascending: false }).order("created_at", { ascending: false });
+    }
+    
+    const { data } = await query;
     if (data) setPosts(data);
+  };
+
+  const fetchCommentsForPost = async (postId: string) => {
+    const { data } = await supabase
+      .from("forum_comments")
+      .select("*")
+      .eq("post_id", postId)
+      .order("created_at", { ascending: true });
+      
+    if (data) {
+      setCommentsMap(prev => ({ ...prev, [postId]: data }));
+    }
+  };
+
+  const toggleComments = (postId: string) => {
+    const newExpanded = new Set(expandedPosts);
+    if (newExpanded.has(postId)) {
+      newExpanded.delete(postId);
+    } else {
+      newExpanded.add(postId);
+      fetchCommentsForPost(postId);
+    }
+    setExpandedPosts(newExpanded);
   };
 
   useEffect(() => {
     fetchPosts();
-    // Real-time subscription
-    const channel = supabase.channel("posts").on("postgres_changes", { event: "*", schema: "public", table: "community_posts" }, () => {
+    // Real-time subscription for posts
+    const postChannel = supabase.channel("posts").on("postgres_changes", { event: "*", schema: "public", table: "community_posts" }, () => {
       fetchPosts();
     }).subscribe();
 
-    // Polling fallback to keep feed active even when realtime events are delayed.
+    // Real-time subscription for comments
+    const commentChannel = supabase.channel("comments").on("postgres_changes", { event: "*", schema: "public", table: "forum_comments" }, (payload) => {
+      if (payload.new && 'post_id' in payload.new) {
+        const postId = payload.new.post_id as string;
+        if (expandedPosts.has(postId)) {
+          fetchCommentsForPost(postId);
+        }
+      }
+    }).subscribe();
+
     const poller = window.setInterval(() => {
-      fetchPosts();
       setActiveMembers((current) => {
         const next = current + (Math.random() > 0.5 ? 1 : -1);
         return Math.min(45, Math.max(18, next));
@@ -52,9 +95,10 @@ export default function CommunityHive() {
 
     return () => {
       window.clearInterval(poller);
-      supabase.removeChannel(channel);
+      supabase.removeChannel(postChannel);
+      supabase.removeChannel(commentChannel);
     };
-  }, []);
+  }, [sortBy, expandedPosts]);
 
   const handlePost = async () => {
     if (!newPost.trim()) return;
@@ -71,9 +115,24 @@ export default function CommunityHive() {
     setPosting(false);
   };
 
-  const handleLike = async (post: Post) => {
-    await supabase.from("community_posts").update({ likes: (post.likes || 0) + 1 }).eq("id", post.id);
-    fetchPosts();
+  const handleLikePost = async (post: Post) => {
+    const user_key = "demo-user";
+    const { data: existing } = await supabase
+      .from("forum_upvotes")
+      .select("id")
+      .eq("post_id", post.id)
+      .eq("user_key", user_key)
+      .maybeSingle();
+
+    if (!existing) {
+      await supabase.from("forum_upvotes").insert({ post_id: post.id, user_key });
+      await supabase.from("community_posts").update({ likes: (post.likes || 0) + 1 }).eq("id", post.id);
+      fetchPosts();
+    } else {
+      await supabase.from("forum_upvotes").delete().eq("id", existing.id);
+      await supabase.from("community_posts").update({ likes: Math.max(0, (post.likes || 0) - 1) }).eq("id", post.id);
+      fetchPosts();
+    }
   };
 
   const timeAgo = (date: string) => {
@@ -86,12 +145,29 @@ export default function CommunityHive() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl font-heading font-bold text-foreground">Community Hive</h1>
-        <p className="text-sm text-muted-foreground mt-1">Hyperlocal discussions about civic missions.</p>
-        <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1">
-          <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
-          <span className="text-[11px] text-primary">Live now · {activeMembers} active members</span>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-heading font-bold text-foreground">Community Hive</h1>
+          <p className="text-sm text-muted-foreground mt-1">Hyperlocal discussions about civic missions.</p>
+          <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1">
+            <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+            <span className="text-[11px] text-primary">Live now · {activeMembers} active members</span>
+          </div>
+        </div>
+        
+        <div className="flex bg-secondary rounded-lg p-1">
+          <button 
+            onClick={() => setSortBy("new")}
+            className={`px-3 py-1 text-xs font-medium rounded-md ${sortBy === "new" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground"}`}
+          >
+            New
+          </button>
+          <button 
+            onClick={() => setSortBy("hot")}
+            className={`px-3 py-1 text-xs font-medium rounded-md ${sortBy === "hot" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground"}`}
+          >
+            Hot
+          </button>
         </div>
       </div>
 
@@ -115,7 +191,7 @@ export default function CommunityHive() {
                 disabled={posting || !newPost.trim()}
                 className="h-8 w-8 rounded-full bg-primary flex items-center justify-center hover:bg-primary/80 transition-colors disabled:opacity-50"
               >
-                <Send className="h-3.5 w-3.5 text-primary-foreground" />
+                {posting ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary-foreground" /> : <Send className="h-3.5 w-3.5 text-primary-foreground" />}
               </button>
             </div>
           </div>
@@ -150,15 +226,29 @@ export default function CommunityHive() {
             </div>
             <p className="text-sm text-foreground leading-relaxed">{post.content}</p>
             <div className="flex items-center gap-4 mt-3 pt-3 border-t border-border">
-              <button onClick={() => handleLike(post)} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors">
+              <button onClick={() => handleLikePost(post)} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors">
                 <ThumbsUp className="h-3.5 w-3.5" />
                 {post.likes || 0}
               </button>
-              <button className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors">
+              <button 
+                onClick={() => toggleComments(post.id)} 
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors"
+              >
                 <MessageCircle className="h-3.5 w-3.5" />
-                {post.replies || 0} replies
+                {post.replies || 0} replies {expandedPosts.has(post.id) ? "(-)" : "(+)"}
               </button>
             </div>
+            
+            {expandedPosts.has(post.id) && (
+              <ThreadedComments 
+                postId={post.id} 
+                comments={commentsMap[post.id] || []} 
+                onCommentAdded={() => {
+                  fetchCommentsForPost(post.id);
+                  fetchPosts();
+                }}
+              />
+            )}
           </div>
         ))}
       </div>

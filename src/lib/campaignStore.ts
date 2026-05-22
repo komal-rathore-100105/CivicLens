@@ -106,6 +106,28 @@ export async function getAllCampaigns(): Promise<Campaign[]> {
   });
 }
 
+export async function getHeatmapData() {
+  const urgencyWeight: Record<string, number> = {
+    critical: 4,
+    high: 3,
+    medium: 2,
+    low: 1
+  };
+
+  const { data } = await supabase
+    .from('missions')
+    .select('latitude, longitude, urgency, fund_goal')
+    .order('created_at', { ascending: false });
+  
+  if (!data) return [];
+
+  return data.map(m => ({
+    lat: m.latitude,
+    lng: m.longitude,
+    intensity: urgencyWeight[m.urgency] * (m.fund_goal || 1000)
+  }));
+}
+
 export async function addReportedCampaign(input: ReportCampaignInput): Promise<{ synced: boolean; message?: string }> {
   const payload = {
     title: input.title,

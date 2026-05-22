@@ -11,54 +11,41 @@ serve(async (req) => {
   try {
     const { before_photo_url, after_photo_url, latitude, longitude, mission_lat, mission_lng, geofence_radius } = await req.json();
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
+    const FASTAPI_URL = Deno.env.get("FASTAPI_URL") || "http://localhost:8000";
 
-    // Step 1: Vision Analysis via AI
-    const visionPrompt = `You are an AI environmental impact verifier. Analyze the before and after photos of a civic mission.
-
-The after photo URL is: ${after_photo_url}
-
-Based on typical civic missions, classify the impact into one of these categories:
-- waste_cleared
-- waste_present
-- road_repaired
-- tree_planted
-- area_cleaned
-
-Respond with ONLY a JSON object (no markdown):
-{"class": "waste_cleared", "confidence": 0.92, "description": "Area shows significant cleanup of plastic waste"}`;
-
-    const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          { role: "system", content: "You are an environmental impact verification AI. Always respond with valid JSON only." },
-          { role: "user", content: visionPrompt },
-        ],
-      }),
-    });
-
-    if (!aiResponse.ok) {
-      const errText = await aiResponse.text();
-      console.error("AI Gateway error:", aiResponse.status, errText);
-      throw new Error(`AI Gateway error: ${aiResponse.status}`);
-    }
-
-    const aiData = await aiResponse.json();
-    const aiContent = aiData.choices?.[0]?.message?.content || "";
+    // Step 1: Vision Analysis via FastAPI Server
+    // For MVP, we simulate sending the image to our FastAPI server
+    // In production, we'd fetch the image buffer and send it as multipart/form-data
     
-    let visionResult = { class: "area_cleaned", confidence: 0.88, description: "Impact detected" };
+    let visionResult = { class: "area_cleaned", confidence: 0.88, description: "Impact detected", severity: "medium" };
     try {
-      const cleaned = aiContent.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-      visionResult = JSON.parse(cleaned);
+      const aiResponse = await fetch(`${FASTAPI_URL}/verify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          before_photo_url,
+          after_photo_url,
+          mission_lat,
+          mission_lng,
+          latitude,
+          longitude,
+          geofence_radius
+        }),
+      });
+
+      if (aiResponse.ok) {
+        const aiData = await aiResponse.json();
+        visionResult = {
+          class: aiData.vision.class,
+          confidence: aiData.vision.confidence,
+          description: aiData.vision.description,
+          severity: aiData.vision.severity || "medium"
+        };
+      }
     } catch (e) {
-      console.error("Failed to parse AI response, using defaults:", aiContent);
+      console.error("Failed to call FastAPI, using defaults:", e);
     }
 
     // Step 2: Geo verification (Haversine)

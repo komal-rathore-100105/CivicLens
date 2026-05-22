@@ -129,6 +129,104 @@ export type Database = {
         }
         Relationships: []
       }
+      certificate_issuances: {
+        Row: {
+          certificate_id: string
+          chain_id: number | null
+          chain_reference: string | null
+          content_hash: string
+          contract_address: string | null
+          created_at: string
+          error_message: string | null
+          filler: Json
+          id: string
+          issuer_name: string
+          mission_title: string
+          recipient_name: string
+          rendered_content: string
+          status: string
+          template_code: string
+          tx_hash: string | null
+          updated_at: string
+        }
+        Insert: {
+          certificate_id: string
+          chain_id?: number | null
+          chain_reference?: string | null
+          content_hash: string
+          contract_address?: string | null
+          created_at?: string
+          error_message?: string | null
+          filler?: Json
+          id?: string
+          issuer_name: string
+          mission_title: string
+          recipient_name: string
+          rendered_content: string
+          status?: string
+          template_code: string
+          tx_hash?: string | null
+          updated_at?: string
+        }
+        Update: {
+          certificate_id?: string
+          chain_id?: number | null
+          chain_reference?: string | null
+          content_hash?: string
+          contract_address?: string | null
+          created_at?: string
+          error_message?: string | null
+          filler?: Json
+          id?: string
+          issuer_name?: string
+          mission_title?: string
+          recipient_name?: string
+          rendered_content?: string
+          status?: string
+          template_code?: string
+          tx_hash?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "certificate_issuances_template_code_fkey"
+            columns: ["template_code"]
+            isOneToOne: false
+            referencedRelation: "certificate_templates"
+            referencedColumns: ["template_code"]
+          },
+        ]
+      }
+      certificate_templates: {
+        Row: {
+          body_template: string
+          created_at: string
+          display_name: string
+          id: string
+          is_active: boolean
+          placeholders: string[]
+          template_code: string
+        }
+        Insert: {
+          body_template: string
+          created_at?: string
+          display_name: string
+          id?: string
+          is_active?: boolean
+          placeholders?: string[]
+          template_code: string
+        }
+        Update: {
+          body_template?: string
+          created_at?: string
+          display_name?: string
+          id?: string
+          is_active?: boolean
+          placeholders?: string[]
+          template_code?: string
+        }
+        Relationships: []
+      }
       community_posts: {
         Row: {
           author_avatar: string

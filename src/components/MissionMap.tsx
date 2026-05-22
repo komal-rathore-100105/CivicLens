@@ -1,8 +1,11 @@
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { MapContainer, TileLayer, CircleMarker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { campaigns, type Campaign } from "@/data/platformData";
 import { useTheme } from "@/components/theme-provider";
+import HeatmapOverlay from "./HeatmapOverlay";
+import { getHeatmapData } from "@/lib/campaignStore";
+import { Layers } from "lucide-react";
 
 const urgencyColor: Record<string, string> = {
   critical: "#ef4444",
@@ -27,6 +30,21 @@ export default function MissionMap({
   showHeatLegend = true,
 }: MissionMapProps) {
   const { resolvedTheme } = useTheme();
+  const [viewMode, setViewMode] = useState<"points" | "heatmap">("points");
+  const [heatData, setHeatData] = useState<Array<[number, number, number]>>([]);
+
+  useEffect(() => {
+    getHeatmapData().then(data => {
+      // Normalize intensity to 0-1 range for leaflet.heat
+      const maxIntensity = Math.max(...data.map(d => d.intensity), 1);
+      const formattedData: Array<[number, number, number]> = data.map(d => [
+        d.lat, 
+        d.lng, 
+        d.intensity / maxIntensity
+      ]);
+      setHeatData(formattedData);
+    });
+  }, []);
 
   const mapStyleUrl = resolvedTheme === "dark"
     ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
@@ -41,6 +59,21 @@ export default function MissionMap({
 
   return (
     <div className="rounded-xl border border-border overflow-hidden relative" style={{ height }}>
+      
+      {/* Map View Toggle */}
+      <div className="absolute top-3 right-3 z-[1000]">
+        <button 
+          onClick={() => setViewMode(viewMode === "points" ? "heatmap" : "points")}
+          className="bg-card/90 backdrop-blur border border-border rounded-lg p-2 shadow-sm flex items-center gap-2 hover:bg-secondary transition-colors"
+          title="Toggle Heatmap"
+        >
+          <Layers className="h-4 w-4 text-foreground" />
+          <span className="text-xs font-medium text-foreground">
+            {viewMode === "points" ? "Show Heatmap" : "Show Pins"}
+          </span>
+        </button>
+      </div>
+
       <MapContainer
         center={center}
         zoom={zoom}
@@ -49,7 +82,11 @@ export default function MissionMap({
       >
         <TileLayer key={resolvedTheme} url={mapStyleUrl} />
 
-        {hotspots.map((point) => (
+        {viewMode === "heatmap" && heatData.length > 0 && (
+           <HeatmapOverlay data={heatData} />
+        )}
+
+        {viewMode === "points" && hotspots.map((point) => (
           <CircleMarker
             key={`hot-${point.id}`}
             center={[point.lat, point.lng]}
@@ -63,7 +100,7 @@ export default function MissionMap({
           />
         ))}
 
-        {points.map((m) => (
+        {viewMode === "points" && points.map((m) => (
           <CircleMarker
             key={m.id}
             center={[m.lat, m.lng]}
@@ -90,9 +127,9 @@ export default function MissionMap({
         ))}
       </MapContainer>
 
-      {showHeatLegend && (
-        <div className="absolute bottom-3 left-3 rounded-lg border border-border bg-card/90 backdrop-blur px-3 py-2">
-          <p className="text-[11px] font-medium text-foreground">Impact Heat Zones</p>
+      {showHeatLegend && viewMode === "points" && (
+        <div className="absolute bottom-3 left-3 rounded-lg border border-border bg-card/90 backdrop-blur px-3 py-2 z-[1000]">
+          <p className="text-[11px] font-medium text-foreground">Impact Hotspots</p>
           <div className="mt-1 space-y-1">
             <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
               <span className="h-2 w-2 rounded-full bg-red-500" /> High urgency
@@ -106,6 +143,18 @@ export default function MissionMap({
           </div>
         </div>
       )}
+      
+      {showHeatLegend && viewMode === "heatmap" && (
+        <div className="absolute bottom-3 left-3 rounded-lg border border-border bg-card/90 backdrop-blur px-3 py-2 z-[1000]">
+          <p className="text-[11px] font-medium text-foreground">Severity Density</p>
+          <div className="mt-1 flex items-center gap-1 w-32 h-2 rounded-full bg-gradient-to-r from-blue-500 via-lime-500 to-red-500"></div>
+          <div className="mt-1 flex justify-between w-32 text-[9px] text-muted-foreground">
+            <span>Low</span>
+            <span>High</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
