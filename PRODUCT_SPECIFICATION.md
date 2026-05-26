@@ -1,8 +1,8 @@
-# CivicLens 9.0 Product Specification
+# Activise Product Specification
 
 ## 1. Executive Summary
 
-CivicLens is an AI-powered environmental campaign and civic engagement platform that converts citizen reports into verified impact outcomes.
+Activise is an AI-powered environmental campaign and civic engagement platform that converts citizen reports into verified impact outcomes.
 
 Core value:
 
@@ -12,7 +12,7 @@ Core value:
 
 Positioning:
 
-- Premium civic-tech product with map-native workflows, AI trust layer, and investor-grade reporting.
+- Premium civic-tech product with map-native workflows, AI trust layer, and corporate ESG reporting.
 
 ---
 
